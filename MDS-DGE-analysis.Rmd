@@ -296,3 +296,13 @@ ggplot(pca_df, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(siz
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+###GSEA analysis
+```{r GSEA}
+
+mart <- useMart(biomart, dataset, host="www.ensembl.org",
+path ="/biomart/martservice", port=80, archive=FALSE, version, verbose = FALSE)
+mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl", host='www.ensembl.org')
+t2g_hs <- biomaRt::getBM(attributes = c('ensembl_transcript_id', 'ensembl_gene_id', 'external_gene_name', 'refseq_mrna'), mart = mart)
+
+```
