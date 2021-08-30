@@ -306,10 +306,13 @@ ens2gene <- t2g_hs[,c(2,3)]
 colnames(ens2gene)[2] <- 'Gene'
 ens2gene <- unique(ens2gene)
 
-##loading hallmark pathways
+##loading hallmark pathways and KEGG pathways
 
 pathways.hallmark <- gmtPathways("~/Desktop/Jordan files/h.all.v7.4.symbols.gmt")
+pathways.kegg<-gmtPathways("~/Desktop/Jordan files/c2.cp.kegg.v7.4.symbols.gmt")
+
 ##generating tidy data and adding it to the results file
+##123pos vs 123neg analysis
 res_posneg_gsea<-results(dds.filtered, contrast=c("cellType", "123pos", "123neg"),tidy=TRUE)
 colnames(res_posneg_gsea)[1]<-"ensembl_gene_id"
 res_posneg_gsea <- inner_join(res_posneg_gsea,ens2gene,by="ensembl_gene_id")
@@ -321,14 +324,155 @@ res_posneg_gsea2<-res_posneg_gsea%>%
   summarise(stat=mean(stat))
 rank_posneg<-deframe(res_posneg_gsea2)
 fgseaRes_posneg <- fgsea(pathways=pathways.hallmark, stats=rank_posneg)
-###working here
+fgseaRes_posneg_kegg<-fgsea(pathways=pathways.kegg, stats=rank_posneg)
+
+fgseaRes_posneg_tidy <-fgseaRes_posneg%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+fgseaRes_posneg_kegg_tidy <-fgseaRes_posneg_kegg%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+##123 pos vs bulk analysis
 
 res_posbulk_gsea<-results(dds.filtered, contrast=c("cellType", "123pos", "bulk"),tidy=TRUE)
 colnames(res_posbulk_gsea)[1]<-"ensembl_gene_id"
 res_posbulk_gsea <- inner_join(res_posbulk_gsea,ens2gene,by="ensembl_gene_id")
 
+res_posbulk_gsea2<-res_posbulk_gsea%>%
+  dplyr::select(Gene, stat) %>%
+  na.omit() %>%
+  distinct() %>%
+  group_by(Gene) %>%
+  summarise(stat=mean(stat))
+rank_posbulk<-deframe(res_posbulk_gsea2)
+fgseaRes_posbulk<- fgsea(pathways=pathways.hallmark, stats=rank_posbulk)
+fgseaRes_posbulk_kegg<-fgsea(pathways=pathways.kegg, stats=rank_posbulk)
+
+fgseaRes_posbulk_tidy <-fgseaRes_posbulk%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+fgseaRes_posbulk_kegg_tidy <-fgseaRes_posbulk_kegg%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+##123 neg vs bulk analysis
 res_negbulk_gsea<-results(dds.filtered, contrast=c("cellType", "123neg", "bulk"),tidy=TRUE)
 colnames(res_negbulk_gsea)[1]<-"ensembl_gene_id"
 res_negbulk_gsea <- inner_join(res_negbulk_gsea,ens2gene,by="ensembl_gene_id")
 
+
+res_negbulk_gsea2<-res_negbulk_gsea%>%
+  dplyr::select(Gene, stat) %>%
+  na.omit() %>%
+  distinct() %>%
+  group_by(Gene) %>%
+  summarise(stat=mean(stat))
+rank_negbulk<-deframe(res_negbulk_gsea2)
+fgseaRes_negbulk<- fgsea(pathways=pathways.hallmark, stats=rank_negbulk)
+fgseaRes_negbulk_kegg<-fgsea(pathways=pathways.kegg, stats=rank_negbulk)
+
+fgseaRes_negbulk_tidy <-fgseaRes_negbulk%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+fgseaRes_negbulk_kegg_tidy <-fgseaRes_negbulk_kegg%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+```
+
+```{r}
+fgseaRes_posneg_tidy%>%
+  dplyr::select(-leadingEdge, -ES) %>%
+  arrange(padj) %>%
+  DT::datatable(caption = 'Table 1: Hallmark genes with 123pos vs 123neg.')
+```
+
+```{r}
+fgseaRes_posneg_kegg_tidy%>%
+  dplyr::select(-leadingEdge, -ES) %>%
+  arrange(padj) %>%
+  DT::datatable(caption = 'Table 1: KEGG pathways with 123pos vs 123neg.')
+```
+```{r}
+fgseaRes_posbulk_tidy%>%
+  dplyr::select(-leadingEdge, -ES) %>%
+  arrange(padj) %>%
+  DT::datatable(caption = 'Table 1: Hallmark genes with 123pos vs bulk.')
+```
+
+```{r}
+fgseaRes_posbulk_kegg_tidy%>%
+  dplyr::select(-leadingEdge, -ES) %>%
+  arrange(padj) %>%
+  DT::datatable(caption = 'Table 1: KEGG pathways with 123pos vs bulk.')
+```
+
+```{r}
+fgseaRes_negbulk_tidy%>%
+  dplyr::select(-leadingEdge, -ES) %>%
+  arrange(padj) %>%
+  DT::datatable(caption = 'Table 1: Hallmark genes with 123neg vs bulk.')
+```
+
+```{r}
+fgseaRes_posneg_kegg_tidy%>%
+  dplyr::select(-leadingEdge, -ES) %>%
+  arrange(padj) %>%
+  DT::datatable(caption = 'Table 1: KEGG pathways with 123neg vs bulk.')
+```
+
+```{r, fig.width= 6, fig.height=8}
+ggplot(fgseaRes_posneg_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA 123pos vs 123neg") + 
+  theme_minimal()
+```
+```{r, fig.width= 8, fig.height=16}
+ggplot(fgseaRes_posneg_kegg_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Kegg pathways NES from GSEA 123pos vs 123neg") + 
+  theme_minimal()
+```
+
+```{r, fig.width= 6, fig.height=8}
+ggplot(fgseaRes_posbulk_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA 123pos vs bulk") + 
+  theme_minimal()
+```
+
+```{r, fig.width= 8, fig.height=16}
+ggplot(fgseaRes_posbulk_kegg_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Kegg pathways NES from GSEA 123pos vs bulk") + 
+  theme_minimal()
+```
+
+```{r, fig.width= 6, fig.height=8}
+ggplot(fgseaRes_negbulk_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA 123neg vs bulk") + 
+  theme_minimal()
+```
+
+```{r, fig.width= 8, fig.height=16}
+ggplot(fgseaRes_negbulk_kegg_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Kegg pathways NES from GSEA 123neg vs bulk ") + 
+  theme_minimal()
 ```
