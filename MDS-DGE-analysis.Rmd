@@ -216,19 +216,61 @@ ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) +
   theme_light() +
   scale_colour_manual(values = colors) +
   ggtitle("123pos vs 123neg unfiltered")
+
+colors <- c("black", viridis[5])
+df<-data.frame(res_123posvsBulk_unfiltered)
+df<-mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
+ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+  geom_point() +
+  theme_light() +
+  scale_colour_manual(values = colors) +
+  ggtitle("123pos vs Bulk unfiltered")
+
+colors <- c("black", viridis[5])
+df<-data.frame(res_123posvsBulk_filtered)
+df<-mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
+ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+  geom_point() +
+  theme_light() +
+  scale_colour_manual(values = colors) +
+  ggtitle("123pos vs bulk filtered")
  
+colors <- c("black", viridis[5])
+df<-data.frame(res_123negvsBulk_unfiltered)
+df<-mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
+ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+  geom_point() +
+  theme_light() +
+  scale_colour_manual(values = colors) +
+  ggtitle("123neg vs Bulk unfiltered")
+
+colors <- c("black", viridis[5])
+df<-data.frame(res_123negvsBulk_filtered)
+df<-mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
+ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+  geom_point() +
+  theme_light() +
+  scale_colour_manual(values = colors) +
+  ggtitle("123neg vs bulk filtered")
+
 ```
 
 ###MA plots
 ```{r, echo=FALSE, fig.width= 6, fig.height=4.5}
 
-plotMA(res_123posvs123neg_unfiltered, 
-       ylim=c(-3,3))
-plotMA(res_123posvsBulk_unfiltered, 
-       ylim=c(-3,3))
-plotMA(res_123negvsBulk_unfiltered, 
-       ylim=c(-3,3))
+plotMA(res_123posvs123neg_unfiltered, main="123pos vs 123neg unfiltered", 
+       ylim=c(-5,5))
+plotMA(res_123posvsBulk_unfiltered,  main="123pos vs Bulk unfiltered", 
+       ylim=c(-5,5))
+plotMA(res_123negvsBulk_unfiltered,  main="123neg vs Bulk unfiltered", 
+       ylim=c(-5,5))
 
+plotMA(res_123posvs123neg_filtered,  main="123pos vs 123neg filtered", 
+       ylim=c(-5,5))
+plotMA(res_123posvsBulk_filtered,  main="123pos vs Bulk filtered", 
+       ylim=c(-5,5))
+plotMA(res_123negvsBulk_filtered,  main="123neg vs Bulk filtered", 
+       ylim=c(-5,5))
 ```
 
 ```{r pca plot 2, message=FALSE}
@@ -246,10 +288,11 @@ alt_col_values=c("#88CCEE", "#CC6677", "#DDCC77")
 
 ### PC1 vs PC2
 ```{r, pca 2 plot, echo = FALSE, fig.width= 6, fig.height=4.5}
-ggplot(pca_df, aes(PC1, PC2, color=type))+geom_point(size=3)+
+ggplot(pca_df, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(size=3)+
   ##xlab(paste0("PC1: ",round(percentVar2$percentVar2[1] * 100), "% variance")) + 
   ##ylab(paste0("PC2: ", round(percentVar2$percentVar2[2] * 100), "% variance"))+
-  scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()
+  scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
+  ggtitle("PCA of analyzed data")
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
