@@ -29,7 +29,7 @@ library(RColorBrewer)
 library(viridis)
 library(ggrepel)
 library(EnhancedVolcano)
-
+library(fgsea)
 ```
 ## R Markdown
 
@@ -299,10 +299,36 @@ Note that the `echo = FALSE` parameter was added to the code chunk to prevent pr
 
 ###GSEA analysis
 ```{r GSEA}
-
-mart <- useMart(biomart, dataset, host="www.ensembl.org",
-path ="/biomart/martservice", port=80, archive=FALSE, version, verbose = FALSE)
+##generate gene names to go with ensembl gene id as the pathways will use gene name
 mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl", host='www.ensembl.org')
 t2g_hs <- biomaRt::getBM(attributes = c('ensembl_transcript_id', 'ensembl_gene_id', 'external_gene_name', 'refseq_mrna'), mart = mart)
+ens2gene <- t2g_hs[,c(2,3)]
+colnames(ens2gene)[2] <- 'Gene'
+ens2gene <- unique(ens2gene)
+
+##loading hallmark pathways
+
+pathways.hallmark <- gmtPathways("~/Desktop/Jordan files/h.all.v7.4.symbols.gmt")
+##generating tidy data and adding it to the results file
+res_posneg_gsea<-results(dds.filtered, contrast=c("cellType", "123pos", "123neg"),tidy=TRUE)
+colnames(res_posneg_gsea)[1]<-"ensembl_gene_id"
+res_posneg_gsea <- inner_join(res_posneg_gsea,ens2gene,by="ensembl_gene_id")
+res_posneg_gsea2<-res_posneg_gsea%>%
+  dplyr::select(Gene, stat) %>%
+  na.omit() %>%
+  distinct() %>%
+  group_by(Gene) %>%
+  summarise(stat=mean(stat))
+rank_posneg<-deframe(res_posneg_gsea2)
+fgseaRes_posneg <- fgsea(pathways=pathways.hallmark, stats=rank_posneg)
+###working here
+
+res_posbulk_gsea<-results(dds.filtered, contrast=c("cellType", "123pos", "bulk"),tidy=TRUE)
+colnames(res_posbulk_gsea)[1]<-"ensembl_gene_id"
+res_posbulk_gsea <- inner_join(res_posbulk_gsea,ens2gene,by="ensembl_gene_id")
+
+res_negbulk_gsea<-results(dds.filtered, contrast=c("cellType", "123neg", "bulk"),tidy=TRUE)
+colnames(res_negbulk_gsea)[1]<-"ensembl_gene_id"
+res_negbulk_gsea <- inner_join(res_negbulk_gsea,ens2gene,by="ensembl_gene_id")
 
 ```
