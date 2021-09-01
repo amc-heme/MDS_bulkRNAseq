@@ -170,12 +170,14 @@ dds <- DESeqDataSetFromTximport(txi.salmon.g,
 dds.unfiltered <- DESeq(dds)
 res.unfiltered <- results( dds.unfiltered)
 
-##filtered data
-dds.filtered<-dds[rowMins(counts(dds))>5,]
+##filtered data changed this from dds[rowMins(counts(dds))>5,] to a less stringent filtering
+keep<-rowSums(counts(dds))>=10
+#dds.filtered<-dds[rowMins(counts(dds))>5,]
+dds.filtered<-dds[keep,]
 dds.filtered<-DESeq(dds.filtered)
 res.filtered<-results(dds.filtered)
 
-
+###outcome the first filtering cut from 60000 genese to 14000 genes with the new filter 35000genes are left which is about 1/2
 ### need to subset to do pairwise comparison unclear if this keeps the patient design aspect
 
 
@@ -282,7 +284,7 @@ ntop=500
 rv <- rowVars(assay(pca_data))
 select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
 pca <- prcomp(t(assay(pca_data)[select,]))
-percentVar <- data.frame(percentVar=pca$sdev^2/sum(pca$sdev^2))%>%
+percentVar2 <- data.frame(percentVar=pca$sdev^2/sum(pca$sdev^2))%>%
   mutate(pc=1:n())%>%dplyr::select(pc, percentVar)
 pca_df<-pca$x%>%data.frame()%>%mutate(type=metadata$cellType)
 
@@ -292,10 +294,31 @@ alt_col_values=c("#88CCEE", "#CC6677", "#DDCC77")
 ### PC1 vs PC2
 ```{r, pca 2 plot, echo = FALSE, fig.width= 6, fig.height=4.5}
 ggplot(pca_df, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(size=3)+
-  ##xlab(paste0("PC1: ",round(percentVar2$percentVar2[1] * 100), "% variance")) + 
-  ##ylab(paste0("PC2: ", round(percentVar2$percentVar2[2] * 100), "% variance"))+
+  xlab(paste0("PC1: ",round(percentVar2$percentVar[1] * 100), "% variance")) + 
+  ylab(paste0("PC2: ", round(percentVar2$percentVar[2] * 100), "% variance"))+
   scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
   ggtitle("PCA of analyzed data")
+```
+```{r pca plot 3, message=FALSE}
+pca_data2<-vst(dds.filtered, blind=T)
+ntop=500
+rv <- rowVars(assay(pca_data2))
+select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
+pca2 <- prcomp(t(assay(pca_data2)[select,]))
+percentVar3 <- data.frame(percentVar=pca2$sdev^2/sum(pca2$sdev^2))%>%
+  mutate(pc=1:n())%>%dplyr::select(pc, percentVar)
+pca_df2<-pca2$x%>%data.frame()%>%mutate(type=metadata$cellType)
+
+alt_col_values=c("#88CCEE", "#CC6677", "#DDCC77")
+```
+
+### PC1 vs PC2
+```{r, pca 3 plot, echo = FALSE, fig.width= 6, fig.height=4.5}
+ggplot(pca_df2, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(size=3)+
+  xlab(paste0("PC1: ",round(percentVar3$percentVar[1] * 100), "% variance")) + 
+  ylab(paste0("PC2: ", round(percentVar3$percentVar[2] * 100), "% variance"))+
+  scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
+  ggtitle("PCA of analyzed data using filtered data")
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
@@ -429,7 +452,7 @@ fgseaRes_posneg_kegg_tidy%>%
 
 ```{r, fig.width= 6, fig.height=8}
 ggplot(fgseaRes_posneg_tidy, aes(reorder(pathway, NES), NES)) +
-  geom_col(aes(fill=padj<0.05)) +
+  geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
   labs(x="Pathway", y="Normalized Enrichment Score",
        title="Hallmark pathways NES from GSEA 123pos vs 123neg") + 
@@ -437,7 +460,7 @@ ggplot(fgseaRes_posneg_tidy, aes(reorder(pathway, NES), NES)) +
 ```
 ```{r, fig.width= 8, fig.height=16}
 ggplot(fgseaRes_posneg_kegg_tidy, aes(reorder(pathway, NES), NES)) +
-  geom_col(aes(fill=padj<0.05)) +
+  geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
   labs(x="Pathway", y="Normalized Enrichment Score",
        title="Kegg pathways NES from GSEA 123pos vs 123neg") + 
@@ -446,7 +469,7 @@ ggplot(fgseaRes_posneg_kegg_tidy, aes(reorder(pathway, NES), NES)) +
 
 ```{r, fig.width= 6, fig.height=8}
 ggplot(fgseaRes_posbulk_tidy, aes(reorder(pathway, NES), NES)) +
-  geom_col(aes(fill=padj<0.05)) +
+  geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
   labs(x="Pathway", y="Normalized Enrichment Score",
        title="Hallmark pathways NES from GSEA 123pos vs bulk") + 
@@ -455,7 +478,7 @@ ggplot(fgseaRes_posbulk_tidy, aes(reorder(pathway, NES), NES)) +
 
 ```{r, fig.width= 8, fig.height=16}
 ggplot(fgseaRes_posbulk_kegg_tidy, aes(reorder(pathway, NES), NES)) +
-  geom_col(aes(fill=padj<0.05)) +
+  geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
   labs(x="Pathway", y="Normalized Enrichment Score",
        title="Kegg pathways NES from GSEA 123pos vs bulk") + 
@@ -464,7 +487,7 @@ ggplot(fgseaRes_posbulk_kegg_tidy, aes(reorder(pathway, NES), NES)) +
 
 ```{r, fig.width= 6, fig.height=8}
 ggplot(fgseaRes_negbulk_tidy, aes(reorder(pathway, NES), NES)) +
-  geom_col(aes(fill=padj<0.05)) +
+  geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
   labs(x="Pathway", y="Normalized Enrichment Score",
        title="Hallmark pathways NES from GSEA 123neg vs bulk") + 
@@ -473,7 +496,7 @@ ggplot(fgseaRes_negbulk_tidy, aes(reorder(pathway, NES), NES)) +
 
 ```{r, fig.width= 8, fig.height=16}
 ggplot(fgseaRes_negbulk_kegg_tidy, aes(reorder(pathway, NES), NES)) +
-  geom_col(aes(fill=padj<0.05)) +
+  geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
   labs(x="Pathway", y="Normalized Enrichment Score",
        title="Kegg pathways NES from GSEA 123neg vs bulk ") + 
