@@ -195,6 +195,9 @@ sum(res_123negvsBulk_unfiltered$pvalue < 0.01 & abs(res_123negvsBulk_unfiltered$
 sum( res_123posvs123neg_filtered$pvalue < 0.01 & abs(res_123posvs123neg_filtered$log2FoldChange) >= 0.5, na.rm=TRUE )
 sum( res_123posvsBulk_filtered$pvalue < 0.01 & abs(res_123posvsBulk_filtered$log2FoldChange) >= 0.5, na.rm=TRUE )
 sum(res_123negvsBulk_filtered$pvalue < 0.01 & abs(res_123negvsBulk_filtered$log2FoldChange) >= 0.5, na.rm=TRUE )
+
+sum(res_123posvs123neg_filtered$padj < 0.1, na.rm=TRUE)
+sum(res_123posvs123neg_unfiltered$padj < 0.1, na.rm=TRUE)
 ```
 ### Volcano Plot
 ```{r, echo=FALSE, fig.width= 10, fig.height=6}
