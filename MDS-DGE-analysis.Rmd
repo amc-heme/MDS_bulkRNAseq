@@ -30,6 +30,7 @@ library(viridis)
 library(ggrepel)
 library(EnhancedVolcano)
 library(fgsea)
+library(limma)
 ```
 ## R Markdown
 
@@ -166,6 +167,12 @@ dds <- DESeqDataSetFromTximport(txi.salmon.g,
                               colData = coldata,
                               design = ~ patient + cellType)
 
+dds<-estimateSizeFactors(dds)
+sf<-as.data.frame(dds$sizeFactor)
+sf<-rownames_to_column(sf, var="SampleName")
+metadata<-inner_join(metadata, sf, by="SampleName")
+names(metadata)[5] <- "sizeFactor"
+metadata$sizeFactor <- round(metadata$sizeFactor ,digit=2)
 ### unfiltered data
 dds.unfiltered <- DESeq(dds)
 res.unfiltered <- results( dds.unfiltered)
@@ -201,6 +208,8 @@ sum(res_123negvsBulk_filtered$pvalue < 0.01 & abs(res_123negvsBulk_filtered$log2
 sum(res_123posvs123neg_filtered$padj < 0.1, na.rm=TRUE)
 sum(res_123posvs123neg_unfiltered$padj < 0.1, na.rm=TRUE)
 ```
+
+
 ### Volcano Plot
 ```{r, echo=FALSE, fig.width= 10, fig.height=6}
 
@@ -263,20 +272,22 @@ ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) +
 ###MA plots
 ```{r, echo=FALSE, fig.width= 6, fig.height=4.5}
 
-plotMA(res_123posvs123neg_unfiltered, main="123pos vs 123neg unfiltered", 
+DESeq2::plotMA(res_123posvs123neg_unfiltered, main="123pos vs 123neg unfiltered", 
        ylim=c(-5,5))
-plotMA(res_123posvsBulk_unfiltered,  main="123pos vs Bulk unfiltered", 
+DESeq2::plotMA(res_123posvsBulk_unfiltered,  main="123pos vs Bulk unfiltered", 
        ylim=c(-5,5))
-plotMA(res_123negvsBulk_unfiltered,  main="123neg vs Bulk unfiltered", 
+DESeq2::plotMA(res_123negvsBulk_unfiltered,  main="123neg vs Bulk unfiltered", 
        ylim=c(-5,5))
 
-plotMA(res_123posvs123neg_filtered,  main="123pos vs 123neg filtered", 
+DESeq2::plotMA(res_123posvs123neg_filtered,  main="123pos vs 123neg filtered", 
        ylim=c(-5,5))
-plotMA(res_123posvsBulk_filtered,  main="123pos vs Bulk filtered", 
+DESeq2::plotMA(res_123posvsBulk_filtered,  main="123pos vs Bulk filtered", 
        ylim=c(-5,5))
-plotMA(res_123negvsBulk_filtered,  main="123neg vs Bulk filtered", 
+DESeq2::plotMA(res_123negvsBulk_filtered,  main="123neg vs Bulk filtered", 
        ylim=c(-5,5))
 ```
+
+
 
 ```{r pca plot 2, message=FALSE}
 pca_data<-vst(dds, blind=T)
@@ -289,39 +300,84 @@ percentVar2 <- data.frame(percentVar=pca$sdev^2/sum(pca$sdev^2))%>%
 pca_df<-pca$x%>%data.frame()%>%mutate(type=metadata$cellType)
 
 alt_col_values=c("#88CCEE", "#CC6677", "#DDCC77")
-```
 
-### PC1 vs PC2
-```{r, pca 2 plot, echo = FALSE, fig.width= 6, fig.height=4.5}
 ggplot(pca_df, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(size=3)+
   xlab(paste0("PC1: ",round(percentVar2$percentVar[1] * 100), "% variance")) + 
   ylab(paste0("PC2: ", round(percentVar2$percentVar[2] * 100), "% variance"))+
   scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
   ggtitle("PCA of analyzed data")
 ```
+
+
+
+
+```{r limma}
+pca_data_limma<-limma::removeBatchEffect(assay(pca_data), pca_data$patient )
+
+#rv <- rowVars(assay(pca_data_limma))
+#select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
+pca_limma <- prcomp(t(pca_data_limma))
+percentVar3 <- data.frame(percentVar=pca_limma$sdev^2/sum(pca_limma$sdev^2))%>%
+  mutate(pc=1:n())%>%dplyr::select(pc, percentVar)
+pca_df_limma<-pca_limma$x%>%data.frame()%>%mutate(type=metadata$cellType)
+
+ggplot(pca_df_limma, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(size=3)+
+  xlab(paste0("PC1: ",round(percentVar3$percentVar[1] * 100), "% variance")) + 
+  ylab(paste0("PC2: ", round(percentVar3$percentVar[2] * 100), "% variance"))+
+  scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
+  ggtitle("PCA of analyzed data with limma")
+```
+
+### PC1 vs PC2
+
+
+
+
 ```{r pca plot 3, message=FALSE}
 pca_data2<-vst(dds.filtered, blind=T)
 ntop=500
 rv <- rowVars(assay(pca_data2))
 select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
 pca2 <- prcomp(t(assay(pca_data2)[select,]))
-percentVar3 <- data.frame(percentVar=pca2$sdev^2/sum(pca2$sdev^2))%>%
+percentVar4 <- data.frame(percentVar=pca2$sdev^2/sum(pca2$sdev^2))%>%
   mutate(pc=1:n())%>%dplyr::select(pc, percentVar)
 pca_df2<-pca2$x%>%data.frame()%>%mutate(type=metadata$cellType)
 
 alt_col_values=c("#88CCEE", "#CC6677", "#DDCC77")
-```
 
-### PC1 vs PC2
-```{r, pca 3 plot, echo = FALSE, fig.width= 6, fig.height=4.5}
 ggplot(pca_df2, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(size=3)+
-  xlab(paste0("PC1: ",round(percentVar3$percentVar[1] * 100), "% variance")) + 
-  ylab(paste0("PC2: ", round(percentVar3$percentVar[2] * 100), "% variance"))+
+  xlab(paste0("PC1: ",round(percentVar4$percentVar[1] * 100), "% variance")) + 
+  ylab(paste0("PC2: ", round(percentVar4$percentVar[2] * 100), "% variance"))+
   scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
   ggtitle("PCA of analyzed data using filtered data")
 ```
 
+
+```{r, pca 4 plot, echo = FALSE, fig.width= 6, fig.height=4.5}
+
+##this code is not working yet.  I have added the size factors but need to figure out how to label based on it.  
+ggplot(pca_df2, aes(PC1, PC2, color=type, shape=metadata$patient, label=metadata$sizeFactor))+geom_point(size=3)+
+  geom_text(aes(label=metadata$sizeFactor),hjust=0, vjust=0)+
+  xlab(paste0("PC1: ",round(percentVar3$percentVar[1] * 100), "% variance")) + 
+  ylab(paste0("PC2: ", round(percentVar3$percentVar[2] * 100), "% variance"))+
+  scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
+  ggtitle("PCA of analyzed data labelled with size factor")
+```
+
+
+
+
+
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+##generates a plot of FBX015 a gene in paper up in 123+
+d<-plotCounts(dds, gene="ENSG00000141665",intgroup=c("cellType","patient"), returnData = TRUE)
+
+ggplot(d, aes(x=cellType, y=count, color=patient))+geom_point()
+```
+
+
 
 ###GSEA analysis
 ```{r GSEA}
