@@ -115,6 +115,31 @@ tpms <- data.frame(txi.salmon.g$abundance)
 expressed_genes<-tpms %>% filter_all(all_vars(. > 5))
 ```
 
+### This code is to bring in the .sf files that have the 45s rRNA included.  This will be used as a metric to include in our PCA plot.
+```{r}
+files.rna<-file.path("~/Desktop/Jordan files/counts.rRNA/rRNA/", list.files("~/Desktop/Jordan files/counts.rRNA/rRNA"), "quant.sf")
+names(files.rna)<-list.files("~/Desktop/Jordan files/counts.rRNA/rRNA")
+
+mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl", host='www.ensembl.org')
+t2g_hs <- biomaRt::getBM(attributes = c('ensembl_transcript_id', 'ensembl_gene_id', 'external_gene_name', 'refseq_mrna'), mart = mart)
+tx2gene <- t2g_hs[,c(1,2)]
+tx2gene[nrow(tx2gene)+1,]=c('rRNA_45S_NR145819','rRNA_45S_NR145819')
+
+txi.salmon.rRNA.g<-tximport(files=files.rna, type="salmon", tx2gene= tx2gene, ignoreTxVersion = TRUE, countsFromAbundance = 'lengthScaledTPM' )
+metadata<-read_table2("~/Desktop/Jordan files/Counts/sample.txt")
+sums<-colSums(txi.salmon.rRNA.g$counts)
+sums<-as.data.frame(sums)
+counts.rRNA<-as.data.frame(txi.salmon.rRNA.g$counts)
+rna.counts<-as.data.frame(t(slice_tail(counts.rRNA)))
+rna.counts <-merge(rna.counts,sums,by='row.names',all=TRUE)
+rna.counts<-mutate(rna.counts, "percentrRNA"= (rRNA_45S_NR145819 /sums)*100 )
+names(rna.counts)[1] <- 'SampleName'
+rna.counts<-select(rna.counts, c("SampleName", "percentrRNA"))
+metadata<-dplyr::full_join(metadata,rna.counts, by="SampleName")
+metadata$percentrRNA <- round(metadata$percentrRNA ,digit=2)
+
+```
+
 ##This chunk of code generates a heatmap using the spearman method as well as a correlation heatmap
 ```{r All samples Heatmap, echo=FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
 ## what we see here shows that patients cluster more closely than the cell types and this will need to be accounted for in the DGE
@@ -138,7 +163,7 @@ exp.pca.pc <- data.frame(exp.pca$x, sample = colnames(expressed_genes))
 
 ### PC1 vs PC2
 ```{r, All samples PCA 1 vs 2, echo = FALSE, warning=FALSE,  fig.width= 6, fig.height=4.5, fig.align='center'}
-metadata<-read_table2("~/Desktop/Jordan files/Counts/sample.txt")
+
 colors <- c(viridis[6], cividis[9], magma[6])
 ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$cellType, shape=metadata$patient)) +
   geom_point(size = 5)+
@@ -171,7 +196,7 @@ dds<-estimateSizeFactors(dds)
 sf<-as.data.frame(dds$sizeFactor)
 sf<-rownames_to_column(sf, var="SampleName")
 metadata<-inner_join(metadata, sf, by="SampleName")
-names(metadata)[5] <- "sizeFactor"
+names(metadata)[6] <- "sizeFactor"
 metadata$sizeFactor <- round(metadata$sizeFactor ,digit=2)
 ### unfiltered data
 dds.unfiltered <- DESeq(dds)
@@ -297,7 +322,7 @@ select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
 pca <- prcomp(t(assay(pca_data)[select,]))
 percentVar2 <- data.frame(percentVar=pca$sdev^2/sum(pca$sdev^2))%>%
   mutate(pc=1:n())%>%dplyr::select(pc, percentVar)
-pca_df<-pca$x%>%data.frame()%>%mutate(type=metadata$cellType)
+pca_df<-pca$x%>%data.frame()%>%mutate(type=metadata$cellType,percent=metadata$percentrRNA)
 
 alt_col_values=c("#88CCEE", "#CC6677", "#DDCC77")
 
@@ -341,7 +366,7 @@ select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
 pca2 <- prcomp(t(assay(pca_data2)[select,]))
 percentVar4 <- data.frame(percentVar=pca2$sdev^2/sum(pca2$sdev^2))%>%
   mutate(pc=1:n())%>%dplyr::select(pc, percentVar)
-pca_df2<-pca2$x%>%data.frame()%>%mutate(type=metadata$cellType)
+pca_df2<-pca2$x%>%data.frame()%>%mutate(type=metadata$cellType, percent=metadata$percentrRNA)
 
 alt_col_values=c("#88CCEE", "#CC6677", "#DDCC77")
 
@@ -355,13 +380,22 @@ ggplot(pca_df2, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(si
 
 ```{r, pca 4 plot, echo = FALSE, fig.width= 6, fig.height=4.5}
 
-##this code is not working yet.  I have added the size factors but need to figure out how to label based on it.  
 ggplot(pca_df2, aes(PC1, PC2, color=type, shape=metadata$patient, label=metadata$sizeFactor))+geom_point(size=3)+
   geom_text(aes(label=metadata$sizeFactor),hjust=0, vjust=0)+
   xlab(paste0("PC1: ",round(percentVar3$percentVar[1] * 100), "% variance")) + 
   ylab(paste0("PC2: ", round(percentVar3$percentVar[2] * 100), "% variance"))+
   scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
   ggtitle("PCA of analyzed data labelled with size factor")
+```
+
+```{r, pca 5 plot, echo = FALSE, fig.width= 6, fig.height=4.5}
+
+ggplot(pca_df2, aes(PC1, PC2, color=type, shape=metadata$patient, label=metadata$percentrRNA))+geom_point(size=3)+
+  geom_text(aes(label=metadata$percentrRNA),hjust=0, vjust=0)+
+  xlab(paste0("PC1: ",round(percentVar3$percentVar[1] * 100), "% variance")) + 
+  ylab(paste0("PC2: ", round(percentVar3$percentVar[2] * 100), "% variance"))+
+  scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
+  ggtitle("PCA of analyzed data labelled with rRNA percentage")
 ```
 
 
@@ -377,7 +411,27 @@ d<-plotCounts(dds, gene="ENSG00000141665",intgroup=c("cellType","patient"), retu
 ggplot(d, aes(x=cellType, y=count, color=patient))+geom_point()
 ```
 
+```{r}
+##generates a plot of EEFSEC a gene in paper up in 123+
+d<-plotCounts(dds, gene="ENSG00000132394",intgroup=c("cellType","patient"), returnData = TRUE)
 
+ggplot(d, aes(x=cellType, y=count, color=patient))+geom_point()
+```
+
+```{r}
+##generates a plot of TGM4 a gene in paper down in 123+
+d<-plotCounts(dds, gene="ENSG00000163810",intgroup=c("cellType","patient"), returnData = TRUE)
+
+ggplot(d, aes(x=cellType, y=count, color=patient))+geom_point()
+```
+
+
+```{r}
+##generates a plot of CRLF2 a gene in paper down in 123+
+d<-plotCounts(dds, gene="ENSG00000163810",intgroup=c("cellType","patient"), returnData = TRUE)
+
+ggplot(d, aes(x=cellType, y=count, color=patient))+geom_point()
+```
 
 ###GSEA analysis
 ```{r GSEA}
