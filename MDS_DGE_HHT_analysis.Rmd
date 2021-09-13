@@ -33,6 +33,10 @@ library(ggrepel)
 library(EnhancedVolcano)
 library(fgsea)
 library(limma)
+library(VennDiagram)
+library(UpSetR)
+library(wesanderson)
+
 ```
 
 ## Define Color Scheme and plot them
@@ -311,5 +315,97 @@ ggplot(fgseaRes_posHHT_kegg_tidy, aes(reorder(pathway, NES), NES)) +
   labs(x="Pathway", y="Normalized Enrichment Score",
        title="Kegg pathways NES from GSEA 123pos vs 123posHHT") + 
   theme_minimal()
+```
+
+#### __All Pathways In Moustache Plot__
+```{r, include = FALSE}
+# First calculate the q values
+pvalues_hallmark <- fgseaRes_posHHT_tidy$pval
+
+#fgseaRank <- fgseaResTidy[order(fgseaResTidy$pval),]
+#qobj.df <- cbind.data.frame(qobj$pvalues, qobj$qvalues, qobj$lfdr)
+#qobj.dfRank <- qobj.df[order(qobj.df$`qobj$pvalues`),]
+  
+toplotMoustache <- cbind.data.frame(fgseaRes_posHHT_tidy$pathway, fgseaRes_posHHT_tidy$NES, fgseaRes_posHHT_tidy$padj, fgseaRes_posHHT_tidy$pval)
+colnames(toplotMoustache) <- c("pathway", "NES", "padj", "pval")
+
+```
+
+```{r}
+ggplot(toplotMoustache, aes(x = NES, y = padj)) +
+  geom_point() + 
+  theme_minimal() +
+  xlab('NES') + 
+  ylab('BH adjusted p-value') +
+  ggtitle("Hallmark pathways from GSEA") +
+  geom_text_repel(aes(label=ifelse(padj<0.05,as.character(pathway),"")),hjust=0,vjust=0) +
+  coord_cartesian(xlim = c(-3, 3), ylim = c(-0.1, 1))
+```
+
+##repeating with KEGG pathways
+```{r, include = FALSE}
+# First calculate the q values
+pvalues_kegg <- fgseaRes_posHHT_kegg_tidy$pval
+
+#fgseaRank <- fgseaResTidy[order(fgseaResTidy$pval),]
+#qobj.df <- cbind.data.frame(qobj$pvalues, qobj$qvalues, qobj$lfdr)
+#qobj.dfRank <- qobj.df[order(qobj.df$`qobj$pvalues`),]
+  
+toplotMoustache_kegg <- cbind.data.frame(fgseaRes_posHHT_kegg_tidy$pathway, fgseaRes_posHHT_kegg_tidy$NES, fgseaRes_posHHT_kegg_tidy$padj, fgseaRes_posHHT_kegg_tidy$pval)
+colnames(toplotMoustache_kegg) <- c("pathway", "NES", "padj", "pval")
+
+```
+
+```{r}
+ggplot(toplotMoustache_kegg, aes(x = NES, y = padj)) +
+  geom_point() + 
+  theme_minimal() +
+  xlab('NES') + 
+  ylab('BH adjusted p-value') +
+  ggtitle("Kegg pathways from GSEA") +
+  geom_text_repel(aes(label=ifelse(padj<0.05,as.character(pathway),"")),hjust=0,vjust=0) +
+  coord_cartesian(xlim = c(-3, 3), ylim = c(-0.1, 1))
+```
+
+```{r, include=F, message=F}
+topPathwaysUp <- fgsea_posHHT_hallmark[ES > 0][head(order(pval), n=10), pathway]
+topPathwaysDown <- fgsea_posHHT_hallmark[ES < 0][head(order(pval), n=10), pathway]
+topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+```
+
+```{r, include=F, message=F}
+topPathwaysUp_kegg <- fgsea_posHHT_KEGG[ES > 0][head(order(pval), n=10), pathway]
+topPathwaysDown_kegg <- fgsea_posHHT_KEGG[ES < 0][head(order(pval), n=10), pathway]
+topPathways_kegg <- c(topPathwaysUp_kegg, rev(topPathwaysDown_kegg))
+```
+
+#### __Top Up and Down Ranked Pathways hallmark__
+```{r, echo=FALSE, fig.width= 8, fig.height=4.5, fig.align='center'}
+plotGseaTable(pathways.hallmark[topPathways], rank_posHHT, fgsea_posHHT_hallmark, 
+              gseaParam=0.5)
+```
+
+#### __Top Up and Down Ranked Pathways kegg __
+```{r, echo=FALSE, fig.width= 8, fig.height=4.5, fig.align='center'}
+plotGseaTable(pathways.kegg[topPathways_kegg], rank_posHHT, fgsea_posHHT_KEGG, 
+              gseaParam=0.5)
+
+plotGseaTable(pathways.kegg[topPathways_kegg], rank_posHHT, fgsea_posHHT_KEGG, gseaParam = 0.5)
+```
+
+#### __Top ranked pathway hallmark__
+**I can do this for any of interest, just let me know**
+```{r, echo=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
+top.path <- as.character(fgseaRes_posHHT_tidy[1,1])
+plotEnrichment(pathways.hallmark[[top.path]],
+               rank_posHHT) + labs(title=top.path)
+```
+
+#### __Top ranked pathway kegg__
+**I can do this for any of interest, just let me know**
+```{r, echo=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
+top.path <- as.character(fgseaRes_posHHT_kegg_tidy[1,1])
+plotEnrichment(pathways.kegg[[top.path]],
+               rank_posHHT) + labs(title=top.path)
 ```
 
