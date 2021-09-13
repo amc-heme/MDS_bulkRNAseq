@@ -183,8 +183,11 @@ sum( res_123vs123HHT_unfiltered$pvalue < 0.01 & abs(res_123vs123HHT_unfiltered$l
 sum(res_123vs123HHT_filtered$pvalue < 0.01 & abs(res_123vs123HHT_filtered$log2FoldChange) >= 0.5, na.rm=TRUE )
 
 
-sum(res_123vs123HHT_unfiltered$padj < 0.1, na.rm=TRUE)
-sum(res_123vs123HHT_filtered$padj < 0.1, na.rm=TRUE)
+sum(res_123vs123HHT_unfiltered$padj < 0.01, na.rm=TRUE)
+sum(res_123vs123HHT_filtered$padj < 0.01, na.rm=TRUE)
+
+sum(res_123vs123HHT_unfiltered$padj < 0.05, na.rm=TRUE)
+sum(res_123vs123HHT_filtered$padj < 0.05, na.rm=TRUE)
 ```
 
 
@@ -239,3 +242,74 @@ ggplot(pca_df, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(siz
   scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
   ggtitle("PCA of analyzed data")
 ```
+
+```{r gsea}
+##pull gene names for gsea analysis
+ens2gene <- t2g_hs[,c(2,3)]
+colnames(ens2gene)[2] <- 'Gene'
+ens2gene <- unique(ens2gene)
+
+#loading hallmark and KEGG pathways
+
+pathways.hallmark <- gmtPathways("~/Desktop/Jordan files/h.all.v7.4.symbols.gmt")
+pathways.kegg<-gmtPathways("~/Desktop/Jordan files/c2.cp.kegg.v7.4.symbols.gmt")
+
+##generating tidy data and adding it to the results file
+res_123vs123HHT_filtered_gsea<-results(dds.filtered, contrast=c("cellType", "123pos", "123pos_HHT"),tidy=TRUE)
+colnames(res_123vs123HHT_filtered_gsea)[1]<-"ensembl_gene_id"
+res_123vs123HHT_filtered_gsea<-inner_join(res_123vs123HHT_filtered_gsea, ens2gene, by="ensembl_gene_id")
+res_123vs123HHT_filtered_gsea_sum<-res_123vs123HHT_filtered_gsea%>%
+  dplyr::select(Gene, stat) %>%
+  na.omit() %>%
+  distinct() %>%
+  group_by(Gene) %>%
+  summarise(stat=mean(stat))
+
+rank_posHHT<-deframe(res_123vs123HHT_filtered_gsea_sum)
+fgsea_posHHT_hallmark<- fgsea(pathways=pathways.hallmark, stats=rank_posHHT)
+fgsea_posHHT_KEGG<-fgsea(pathways=pathways.kegg, stats=rank_posHHT)
+
+fgseaRes_posHHT_tidy <-fgsea_posHHT_hallmark%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+fgseaRes_posHHT_kegg_tidy <-fgsea_posHHT_KEGG%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+```
+
+##Displaying a table of ordered pathways
+
+```{r}
+fgseaRes_posHHT_tidy%>%
+  dplyr::select(-leadingEdge, -ES) %>%
+  arrange(padj) %>%
+  DT::datatable(caption = 'Table 1: Hallmark genes with 123pos vs 123posHHT.')
+```
+
+```{r}
+fgseaRes_posHHT_kegg_tidy%>%
+  dplyr::select(-leadingEdge, -ES) %>%
+  arrange(padj) %>%
+  DT::datatable(caption = 'Table 1: KEGG pathway genes with 123pos vs 123posHHT.')
+```
+#plot the waterfall results
+
+```{r, fig.width= 6, fig.height=8}
+ggplot(fgseaRes_posHHT_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.01)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA 123pos vs 123posHHT") + 
+  theme_minimal()
+```
+
+```{r, fig.width= 8, fig.height=16}
+ggplot(fgseaRes_posHHT_kegg_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.01)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Kegg pathways NES from GSEA 123pos vs 123posHHT") + 
+  theme_minimal()
+```
+
