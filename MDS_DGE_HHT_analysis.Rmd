@@ -16,7 +16,7 @@ This analysis is to look at the MDS samples that were treated with the drug HTT 
 2.    Gene expression was quantified using salmon  v1.3.0
 3.    TPMs were obtained for the genes using tximport 1.20.0
 
-```{r import, message=FALSE}
+```{r import, message=FALSE, warning=FALSE}
 library(dplyr)
 library(ggplot2)
 library(DESeq2)
@@ -36,18 +36,20 @@ library(limma)
 library(VennDiagram)
 library(UpSetR)
 library(wesanderson)
-
+library(kableExtra)
 ```
 
-## Define Color Scheme and plot them
+
 ```{r, echo=FALSE, include=FALSE}
+## Define Color Scheme and plot them
 plasma <- viridis::plasma(n = 10)
 viridis <- viridis::viridis(n = 10)
 cividis <- viridis::cividis(n=10)
 magma <- viridis::magma(n=10)
 ```
 
-##This section of code will generate a summary table of the samples sequenced and their sequencing and alignment metrics
+## Summary of Data Metrics
+
 ```{r summary, echo=FALSE}
 MDS_metric <- read_excel("~/Desktop/Jordan files/Results/MDS stats.xlsx")
 
@@ -55,10 +57,13 @@ starting_metrics<-filter(MDS_metric,grepl('HTB61|HTB336', patient))
 
 starting_metrics<-subset(starting_metrics, Sample!="CD123-" & Sample!="Bulk")
 kable(starting_metrics, caption="Summary of Data Metrics")
-```
-##This section of code will import and format the data for DeSeq2
 
-```{r data, message=FALSE}
+
+```
+
+## Summary of Data prior to analysis
+
+```{r data, message=FALSE, echo=FALSE}
 #to generate a vector of names and file locations
 files<-file.path("~/Desktop/Jordan files/counts.rRNA/HHT/", list.files("~/Desktop/Jordan files/counts.rRNA/HHT/"), "quant.sf")
 names(files)<-list.files("~/Desktop/Jordan files/counts.rRNA/HHT")
@@ -67,6 +72,11 @@ mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensemb
 t2g_hs <- biomaRt::getBM(attributes = c('ensembl_transcript_id', 'ensembl_gene_id', 'external_gene_name', 'refseq_mrna'), mart = mart)
 tx2gene <- t2g_hs[,c(1,2)]
 tx2gene[nrow(tx2gene)+1,]=c('rRNA_45S_NR145819','rRNA_45S_NR145819')
+
+
+ens2gene <- t2g_hs[,c(2,3)]
+colnames(ens2gene)[2] <- 'Gene'
+ens2gene <- unique(ens2gene)
 
 # import transcript level counts
 txi.salmon.t<-tximport(files, type="salmon", txOut=TRUE)
@@ -92,14 +102,17 @@ names(rna.counts)[1] <- 'SampleName'
 rna.counts<-select(rna.counts, c("SampleName", "percentrRNA"))
 metadata<-dplyr::full_join(metadata,rna.counts, by="SampleName")
 metadata$percentrRNA <- round(metadata$percentrRNA ,digit=2)
+kbl(metadata, booktabs=T, caption="Metadata Table") %>%
+  kable_styling(latex_options=c("striped", "scale_down"))
 ```
 
-```{r}
+```{r, echo=FALSE}
 expressed_genes<-tpms %>% filter_all(all_vars(. > 5))
 
 ```
+There are 5001 genes with more than 5 counts in all samples
 
-##This chunk of code generates a heatmap using the spearman method as well as a correlation heatmap
+## Sample Heatmap and Correlation matrix
 ```{r All samples Heatmap, echo=FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
 ## what we see here shows that patients cluster more closely than the cell types and this will need to be accounted for in the DGE
 pheatmap(expressed_genes, scale="row")
@@ -112,12 +125,26 @@ pheatmap(cols.cor, method="spearman")
 
 
 
-```{r pca plot, message=FALSE}
+```{r pca plot, message=FALSE, echo=FALSE}
 exp.pca <- prcomp(t(log2(expressed_genes)))
 exp.pca.summary <- summary(exp.pca)$importance
 pc1var = round(exp.pca.summary[3,1] * 100, 1)
 pc2var = round(exp.pca.summary[3,2] * 100 - pc1var, 1)
 exp.pca.pc <- data.frame(exp.pca$x, sample = colnames(expressed_genes))
+
+pc_loadings<-exp.pca$rotation %>%
+  as_tibble(rownames="ensembl_gene_id")
+top_loading_pc1<-pc_loadings %>%
+  select(ensembl_gene_id, PC1) %>%
+  arrange(desc(abs(PC1)))%>%
+  inner_join(ens2gene, by="ensembl_gene_id") %>%
+  head(n=10)
+
+  top_loading_pc2<-pc_loadings %>%
+  select(ensembl_gene_id, PC2) %>%
+  arrange(desc(abs(PC2)))%>%
+  inner_join(ens2gene, by="ensembl_gene_id") %>%
+  head(n=10)
 
 ```
 
@@ -134,14 +161,14 @@ ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$cellType, shape=metadata
   geom_text_repel(aes(label=metadata$SampleName), size=3, max.overlaps = Inf)+
   ggtitle("Expressed Genes in All Samples > 5 TPM") 
 ```
+We see a stronger correlation between patient than between sample type.  One principle component is seperating on patient while the other is separating based on sample type.  
 
-
-## 3. Run Differential Expression testing using DESeq2 and Calculate Gene Set Enrichment
-## Compare 123pos vs 123neg, 123neg vs bulk, and 123pos vs bulk 
+##  Run Differential Expression testing using DESeq2 and Calculate Gene Set Enrichment
+### Compare 123pos vs 123neg, 123neg vs bulk, and 123pos vs bulk 
 #### sig = padj <0.01 and abs(l2fc) >0.5
 #### 
 
-```{r DGE}
+```{r DGE, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
 coldata<-metadata
 coldata<-column_to_rownames(coldata, 'SampleName')
 ## need to confirm that all names are in the same order
@@ -175,37 +202,58 @@ res.filtered<-results(dds.filtered)
 ### need to subset to do pairwise comparison unclear if this keeps the patient design aspect
 
 
-res_123vs123HHT_unfiltered<-results( dds.unfiltered, contrast=c("cellType", "123pos", "123pos_HHT"))
+#res_123vs123HHT_unfiltered<-results( dds.unfiltered, contrast=c("cellType", "123pos", "123pos_HHT"))
 
 res_123vs123HHT_filtered<-results(dds.filtered, contrast=c("cellType", "123pos", "123pos_HHT"))
 
 
 ## look at the numbers of genes meeting threshold the log fold change call is not changing things
-sum( res_123vs123HHT_unfiltered$pvalue < 0.01 & abs(res_123vs123HHT_unfiltered$log2FoldChange) >= 0.5, na.rm=TRUE )
+#sum( res_123vs123HHT_unfiltered$pvalue < 0.01 & abs(res_123vs123HHT_unfiltered$log2FoldChange) >= 0.5, na.rm=TRUE )
 
 
 sum(res_123vs123HHT_filtered$pvalue < 0.01 & abs(res_123vs123HHT_filtered$log2FoldChange) >= 0.5, na.rm=TRUE )
 
 
-sum(res_123vs123HHT_unfiltered$padj < 0.01, na.rm=TRUE)
+#sum(res_123vs123HHT_unfiltered$padj < 0.01, na.rm=TRUE)
+
 sum(res_123vs123HHT_filtered$padj < 0.01, na.rm=TRUE)
 
-sum(res_123vs123HHT_unfiltered$padj < 0.05, na.rm=TRUE)
+#sum(res_123vs123HHT_unfiltered$padj < 0.05, na.rm=TRUE)
 sum(res_123vs123HHT_filtered$padj < 0.05, na.rm=TRUE)
+ens2gene <- t2g_hs[,c(2,3)]
+ens2gene <- unique(ens2gene)
+DEG_filtered<-as.data.frame(res_123vs123HHT_filtered)
+DGE_filter<-filter(DEG_filtered, padj<.01)
+DGE_filter<-rownames_to_column(DGE_filter, var="ensembl_gene_id")
+DGE_filter<-right_join(ens2gene,DGE_filter, by="ensembl_gene_id") %>% select(external_gene_name, padj, pvalue,log2FoldChange)
+DGE_filter<-arrange(DGE_filter, padj) 
+DGE_filter$padj<-formatC(DGE_filter$padj, format = "e", digits = 2)
+DGE_filter$pvalue<-formatC(DGE_filter$pvalue, format = "e", digits = 2)
+DGE_filter$log2FoldChange<-round(DGE_filter$log2FoldChange, digits = 2)
+
+#DGE_filter$padj<-format(DGE_filter$padj, digits=3)
+#DGE_filter$pvalue<-format(DGE_filter$pvalue, digits=3)
+#DGE_filter$log2FoldChange<-format(DGE_filter$log2FoldChange, digits=3)
+```
+
+```{r, echo=FALSE}
+kbl(DGE_filter, booktabs = T, longtable = TRUE, caption = "Genes with padj value of <.01") %>%
+  kable_styling(latex_options = c("hold_position", "repeat_header"))%>%
+  scroll_box(width = "600px", height = "500px")
 ```
 
 
 ### Volcano Plot
-```{r, echo=FALSE, fig.width= 10, fig.height=6}
+```{r, echo=FALSE, warning=FALSE, fig.width= 10, fig.height=6}
 
 colors <- c("black", viridis[5])
-df<-data.frame(res_123vs123HHT_unfiltered)
-df<-mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
-ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
-  geom_point() +
-  theme_light() +
-  scale_colour_manual(values = colors) +
-  ggtitle("123pos vs 123posHHT unfiltered")
+#df<-data.frame(res_123vs123HHT_unfiltered)
+#df<-mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
+#ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+#  geom_point() +
+#  theme_light() +
+#  scale_colour_manual(values = colors) +
+#  ggtitle("123pos vs 123posHHT unfiltered")
 
 colors <- c("black", viridis[5])
 df<-data.frame(res_123vs123HHT_filtered)
@@ -220,16 +268,16 @@ ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) +
 ###MA plots
 ```{r, echo=FALSE, fig.width= 6, fig.height=4.5}
 
-DESeq2::plotMA(res_123vs123HHT_unfiltered, main="123pos vs 123posHHT unfiltered", 
-       ylim=c(-5,5))
+#DESeq2::plotMA(res_123vs123HHT_unfiltered, main="123pos vs 123posHHT unfiltered", 
+#      ylim=c(-5,5))
 
 DESeq2::plotMA(res_123vs123HHT_filtered,  main="123pos vs 123posHHT filtered", 
        ylim=c(-5,5))
 
 ```
 
-```{r pca plot 2, message=FALSE}
-pca_data<-vst(dds, blind=T)
+```{r pca plot 2, message=FALSE, echo=FALSE, warning=FALSE}
+pca_data<-vst(dds.filtered, blind=T)
 ntop=500
 rv <- rowVars(assay(pca_data))
 select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
@@ -240,14 +288,31 @@ pca_df<-pca$x%>%data.frame()%>%mutate(type=metadata$cellType,percent=metadata$pe
 
 alt_col_values=c("#88CCEE", "#CC6677", "#DDCC77")
 
+pc_loadings<-pca$rotation %>%
+  as_tibble(rownames="ensembl_gene_id")
+top_loading_pc1<-as.data.frame(pc_loadings) %>%
+  select(ensembl_gene_id, PC1) %>%
+  arrange(desc(abs(PC1)))%>%
+  inner_join(ens2gene, by="ensembl_gene_id")%>%
+  head(n=10)
+
+top_loading_pc2<-pc_loadings %>%
+  select(ensembl_gene_id, PC2) %>%
+  arrange(desc(abs(PC2)))%>%
+  inner_join(ens2gene, by="ensembl_gene_id") %>%
+  head(n=10)
+
+
+  
+  
 ggplot(pca_df, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(size=3)+
   xlab(paste0("PC1: ",round(percentVar2$percentVar[1] * 100), "% variance")) + 
   ylab(paste0("PC2: ", round(percentVar2$percentVar[2] * 100), "% variance"))+
   scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
-  ggtitle("PCA of analyzed data")
+  ggtitle("PCA of normalized data")
 ```
 
-```{r gsea}
+```{r gsea, echo=FALSE, warning=FALSE}
 ##pull gene names for gsea analysis
 ens2gene <- t2g_hs[,c(2,3)]
 colnames(ens2gene)[2] <- 'Gene'
@@ -284,14 +349,14 @@ fgseaRes_posHHT_kegg_tidy <-fgsea_posHHT_KEGG%>%
 
 ##Displaying a table of ordered pathways
 
-```{r}
+```{r, echo=FALSE, warning=FALSE}
 fgseaRes_posHHT_tidy%>%
   dplyr::select(-leadingEdge, -ES) %>%
   arrange(padj) %>%
   DT::datatable(caption = 'Table 1: Hallmark genes with 123pos vs 123posHHT.')
 ```
 
-```{r}
+```{r, echo=FALSE, warning=FALSE}
 fgseaRes_posHHT_kegg_tidy%>%
   dplyr::select(-leadingEdge, -ES) %>%
   arrange(padj) %>%
@@ -299,7 +364,7 @@ fgseaRes_posHHT_kegg_tidy%>%
 ```
 #plot the waterfall results
 
-```{r, fig.width= 6, fig.height=8}
+```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=8}
 ggplot(fgseaRes_posHHT_tidy, aes(reorder(pathway, NES), NES)) +
   geom_col(aes(fill=padj<0.01)) +
   coord_flip() +
@@ -308,7 +373,7 @@ ggplot(fgseaRes_posHHT_tidy, aes(reorder(pathway, NES), NES)) +
   theme_minimal()
 ```
 
-```{r, fig.width= 8, fig.height=16}
+```{r, echo=FALSE, warning=FALSE, fig.width= 8, fig.height=16}
 ggplot(fgseaRes_posHHT_kegg_tidy, aes(reorder(pathway, NES), NES)) +
   geom_col(aes(fill=padj<0.01)) +
   coord_flip() +
@@ -318,7 +383,7 @@ ggplot(fgseaRes_posHHT_kegg_tidy, aes(reorder(pathway, NES), NES)) +
 ```
 
 #### __All Pathways In Moustache Plot__
-```{r, include = FALSE}
+```{r, echo=FALSE, warning=FALSE, include = FALSE}
 # First calculate the q values
 pvalues_hallmark <- fgseaRes_posHHT_tidy$pval
 
@@ -331,7 +396,7 @@ colnames(toplotMoustache) <- c("pathway", "NES", "padj", "pval")
 
 ```
 
-```{r}
+```{r, echo=FALSE, warning=FALSE}
 ggplot(toplotMoustache, aes(x = NES, y = padj)) +
   geom_point() + 
   theme_minimal() +
@@ -343,7 +408,7 @@ ggplot(toplotMoustache, aes(x = NES, y = padj)) +
 ```
 
 ##repeating with KEGG pathways
-```{r, include = FALSE}
+```{r, echo = FALSE, warning=FALSE}
 # First calculate the q values
 pvalues_kegg <- fgseaRes_posHHT_kegg_tidy$pval
 
@@ -356,7 +421,7 @@ colnames(toplotMoustache_kegg) <- c("pathway", "NES", "padj", "pval")
 
 ```
 
-```{r}
+```{r, echo=FALSE, warning=FALSE}
 ggplot(toplotMoustache_kegg, aes(x = NES, y = padj)) +
   geom_point() + 
   theme_minimal() +
@@ -367,26 +432,26 @@ ggplot(toplotMoustache_kegg, aes(x = NES, y = padj)) +
   coord_cartesian(xlim = c(-3, 3), ylim = c(-0.1, 1))
 ```
 
-```{r, include=F, message=F}
+```{r, include=T, message=F, warning=FALSE, echo=FALSE}
 topPathwaysUp <- fgsea_posHHT_hallmark[ES > 0][head(order(pval), n=10), pathway]
 topPathwaysDown <- fgsea_posHHT_hallmark[ES < 0][head(order(pval), n=10), pathway]
 topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
 ```
 
-```{r, include=F, message=F}
+```{r, include=T, message=F, warning=FALSE, echo=FALSE}
 topPathwaysUp_kegg <- fgsea_posHHT_KEGG[ES > 0][head(order(pval), n=10), pathway]
 topPathwaysDown_kegg <- fgsea_posHHT_KEGG[ES < 0][head(order(pval), n=10), pathway]
 topPathways_kegg <- c(topPathwaysUp_kegg, rev(topPathwaysDown_kegg))
 ```
 
 #### __Top Up and Down Ranked Pathways hallmark__
-```{r, echo=FALSE, fig.width= 8, fig.height=4.5, fig.align='center'}
+```{r, echo=FALSE, warning=FALSE, fig.width= 8, fig.height=4.5, fig.align='center'}
 plotGseaTable(pathways.hallmark[topPathways], rank_posHHT, fgsea_posHHT_hallmark, 
               gseaParam=0.5)
 ```
 
 #### __Top Up and Down Ranked Pathways kegg __
-```{r, echo=FALSE, fig.width= 8, fig.height=4.5, fig.align='center'}
+```{r, echo=FALSE, warning=FALSE, fig.width= 8, fig.height=4.5, fig.align='center'}
 plotGseaTable(pathways.kegg[topPathways_kegg], rank_posHHT, fgsea_posHHT_KEGG, 
               gseaParam=0.5)
 
@@ -395,7 +460,7 @@ plotGseaTable(pathways.kegg[topPathways_kegg], rank_posHHT, fgsea_posHHT_KEGG, g
 
 #### __Top ranked pathway hallmark__
 **I can do this for any of interest, just let me know**
-```{r, echo=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
+```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
 top.path <- as.character(fgseaRes_posHHT_tidy[1,1])
 plotEnrichment(pathways.hallmark[[top.path]],
                rank_posHHT) + labs(title=top.path)
@@ -403,7 +468,7 @@ plotEnrichment(pathways.hallmark[[top.path]],
 
 #### __Top ranked pathway kegg__
 **I can do this for any of interest, just let me know**
-```{r, echo=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
+```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
 top.path <- as.character(fgseaRes_posHHT_kegg_tidy[1,1])
 plotEnrichment(pathways.kegg[[top.path]],
                rank_posHHT) + labs(title=top.path)
