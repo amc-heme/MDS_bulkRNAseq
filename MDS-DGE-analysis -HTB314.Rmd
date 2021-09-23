@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 3.    TPMs were obtained for the genes using tximport 1.20.0
 4.    Sample HTB314 was removed from this analysis due to its size factor being very different from others and leading to abberant results.  
 
-```{r import, message=FALSE}
+```{r import, message=FALSE, warning=FALSE}
 library(dplyr)
 library(ggplot2)
 library(DESeq2)
@@ -41,7 +41,7 @@ cividis <- viridis::cividis(n=10)
 magma <- viridis::magma(n=10)
 ```
 
-##This section of code will generate a summary table of the samples sequenced and their sequencing and alignment metrics
+## Generate a summary table of the samples sequenced and their sequencing and alignment metrics following removal of sample HTB314
 ```{r summary, echo=FALSE}
 MDS_metric <- read_excel("~/Desktop/Jordan files/Results/MDS stats.xlsx")
 
@@ -49,9 +49,9 @@ starting_metrics<-filter(MDS_metric,grepl('MDS268|MDS280', patient))
 kable(starting_metrics, caption="Summary of Data Metrics")
 ```
 
-##This section of code will import and format the data for DeSeq2
+## Import and format the data for DeSeq2
 
-```{r data, message=FALSE}
+```{r data, message=FALSE, echo=FALSE, warning=FALSE}
 #to generate a vector of names and file locations
 files<-file.path("~/Desktop/Jordan files/Counts/salmon/salmon-314/", list.files("~/Desktop/Jordan files/Counts/salmon/salmon-314//"), "quant.sf")
 names(files)<-list.files("~/Desktop/Jordan files/Counts/salmon/salmon-314/")
@@ -77,13 +77,13 @@ metadata<-filter(metadata, patient %in% c("MDS268", "MDS280"))
 
 ```
 
-##This chunk of code sets an expression threshold for TPM where all samples have at least 5 counts
-```{r expressed genes}
+
+```{r expressed genes, echo=FALSE}
 
 expressed_genes<-tpms %>% filter_all(all_vars(. > 5))
 ```
 
-##This chunk of code generates a heatmap using the spearman method as well as a correlation heatmap
+## Heatmap using the spearman method as well as a correlation heatmap
 ```{r All samples Heatmap, echo=FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
 ## what we see here shows that patients cluster more closely than the cell types and this will need to be accounted for in the DGE
 pheatmap(expressed_genes, scale="row")
@@ -96,7 +96,7 @@ pheatmap(cols.cor, method="spearman")
 
 
 
-```{r pca plot, message=FALSE}
+```{r pca plot, message=FALSE, echo=FALSE}
 exp.pca <- prcomp(t(log2(expressed_genes)))
 exp.pca.summary <- summary(exp.pca)$importance
 pc1var = round(exp.pca.summary[3,1] * 100, 1)
@@ -121,9 +121,9 @@ ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$cellType, shape=metadata
 ## 3. Run Differential Expression testing using DESeq2 and Calculate Gene Set Enrichment
 ## Compare 123pos vs 123neg, 123neg vs bulk, and 123pos vs bulk 
 #### sig = padj <0.01 and abs(l2fc) >0.5
-#### 
+ 
 
-```{r DGE}
+```{r DGE, echo=FALSE, warning=FALSE, message=FALSE}
 coldata<-dplyr::select(metadata, -FileName) 
 coldata<-column_to_rownames(coldata, 'SampleName')
 ## need to confirm that all names are in the same order
@@ -178,7 +178,7 @@ sum(res_123posvs123neg_filtered$padj < 0.05, na.rm=TRUE)
 sum(res_123posvs123neg_unfiltered$padj < 0.05, na.rm=TRUE)
 ```
 ### Volcano Plot
-```{r, echo=FALSE, fig.width= 10, fig.height=6}
+```{r, echo=FALSE, warning=FALSE, fig.width= 10, fig.height=6}
 
 colors <- c("black", viridis[5])
 df<-data.frame(res_123posvs123neg_filtered)
@@ -192,20 +192,20 @@ ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) +
 colors <- c("black", viridis[5])
 df<-data.frame(res_123posvs123neg_unfiltered)
 df<-mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
-ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
-  geom_point() +
-  theme_light() +
-  scale_colour_manual(values = colors) +
-  ggtitle("123pos vs 123neg unfiltered")
+#ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+#  geom_point() +
+#  theme_light() +
+#  scale_colour_manual(values = colors) +
+#  ggtitle("123pos vs 123neg unfiltered")
 
 colors <- c("black", viridis[5])
 df<-data.frame(res_123posvsBulk_unfiltered)
 df<-mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
-ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
-  geom_point() +
-  theme_light() +
-  scale_colour_manual(values = colors) +
-  ggtitle("123pos vs Bulk unfiltered")
+#ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+#  geom_point() +
+#  theme_light() +
+ # scale_colour_manual(values = colors) +
+#  ggtitle("123pos vs Bulk unfiltered")
 
 colors <- c("black", viridis[5])
 df<-data.frame(res_123posvsBulk_filtered)
@@ -219,11 +219,11 @@ ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) +
 colors <- c("black", viridis[5])
 df<-data.frame(res_123negvsBulk_unfiltered)
 df<-mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
-ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
-  geom_point() +
-  theme_light() +
-  scale_colour_manual(values = colors) +
-  ggtitle("123neg vs Bulk unfiltered")
+#ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+#  geom_point() +
+#  theme_light() +
+#  scale_colour_manual(values = colors) +
+#  ggtitle("123neg vs Bulk unfiltered")
 
 colors <- c("black", viridis[5])
 df<-data.frame(res_123negvsBulk_filtered)
@@ -236,15 +236,15 @@ ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) +
 
 ```
 
-###MA plots
+### MA plots
 ```{r, echo=FALSE, fig.width= 6, fig.height=4.5}
 
-DESeq2::plotMA(res_123posvs123neg_unfiltered, main="123pos vs 123neg unfiltered", 
-       ylim=c(-5,5))
-DESeq2::plotMA(res_123posvsBulk_unfiltered,  main="123pos vs Bulk unfiltered", 
-       ylim=c(-5,5))
-DESeq2::plotMA(res_123negvsBulk_unfiltered,  main="123neg vs Bulk unfiltered", 
-       ylim=c(-5,5))
+#DESeq2::plotMA(res_123posvs123neg_unfiltered, main="123pos vs 123neg unfiltered", 
+ #      ylim=c(-5,5))
+#DESeq2::plotMA(res_123posvsBulk_unfiltered,  main="123pos vs Bulk unfiltered", 
+ #      ylim=c(-5,5))
+#DESeq2::plotMA(res_123negvsBulk_unfiltered,  main="123neg vs Bulk unfiltered", 
+ #      ylim=c(-5,5))
 
 DESeq2::plotMA(res_123posvs123neg_filtered,  main="123pos vs 123neg filtered", 
        ylim=c(-5,5))
@@ -254,7 +254,7 @@ DESeq2::plotMA(res_123negvsBulk_filtered,  main="123neg vs Bulk filtered",
        ylim=c(-5,5))
 ```
 
-```{r pca plot 2, message=FALSE}
+```{r pca plot 2, message=FALSE, echo=FALSE, include=FALSE}
 pca_data<-vst(dds, blind=T)
 ntop=500
 rv <- rowVars(assay(pca_data))
@@ -273,7 +273,7 @@ ggplot(pca_df, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(siz
   ggtitle("PCA of analyzed data")
 ```
 
-```{r pca plot 3, message=FALSE}
+```{r pca plot 3, message=FALSE, echo=FALSE}
 pca_data2<-vst(dds.filtered, blind=T)
 ntop=500
 rv <- rowVars(assay(pca_data2))
@@ -292,7 +292,7 @@ ggplot(pca_df2, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(si
   ggtitle("PCA of analyzed data using filtered data")
 ```
 
-```{r, pca 4 plot, echo = FALSE, fig.width= 6, fig.height=4.5}
+```{r, pca 4 plot, echo = FALSE}
 
 ggplot(pca_df2, aes(PC1, PC2, color=type, shape=metadata$patient, label=metadata$sizeFactor))+geom_point(size=3)+
   geom_text(aes(label=metadata$sizeFactor),hjust=0, vjust=0)+
@@ -301,36 +301,36 @@ ggplot(pca_df2, aes(PC1, PC2, color=type, shape=metadata$patient, label=metadata
   scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
   ggtitle("PCA of analyzed data labelled with size factor")
 ```
-```{r}
+```{r, echo=FALSE}
 ##generates a plot of FBX015 a gene in paper up in 123+
 d<-plotCounts(dds.filtered, gene="ENSG00000141665",intgroup=c("cellType","patient"), returnData = TRUE)
 
 ggplot(d, aes(x=cellType, y=count, color=patient))+geom_point()
 ```
 
-```{r}
+```{r, echo=FALSE}
 ##generates a plot of EEFSEC a gene in paper up in 123+
 d<-plotCounts(dds.filtered, gene="ENSG00000132394",intgroup=c("cellType","patient"), returnData = TRUE)
 
 ggplot(d, aes(x=cellType, y=count, color=patient))+geom_point()
 ```
 
-```{r}
+```{r, echo=FALSE}
 ##generates a plot of TGM4 a gene in paper down in 123+
 d<-plotCounts(dds, gene="ENSG00000163810",intgroup=c("cellType","patient"), returnData = TRUE)
 
 ggplot(d, aes(x=cellType, y=count, color=patient))+geom_point()
 ```
 
-```{r}
+```{r, echo=FALSE}
 ##generates a plot of CRLF2 a gene in paper down in 123+
 d<-plotCounts(dds, gene="ENSG00000163810",intgroup=c("cellType","patient"), returnData = TRUE)
 
 ggplot(d, aes(x=cellType, y=count, color=patient))+geom_point()
 ```
 
-###GSEA analysis
-```{r GSEA}
+### GSEA analysis
+```{r GSEA, echo=FALSE, warning=FALSE}
 ##generate gene names to go with ensembl gene id as the pathways will use gene name
 mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl", host='www.ensembl.org')
 t2g_hs <- biomaRt::getBM(attributes = c('ensembl_transcript_id', 'ensembl_gene_id', 'external_gene_name', 'refseq_mrna'), mart = mart)
@@ -415,48 +415,48 @@ fgseaRes_negbulk_kegg_tidy <-fgseaRes_negbulk_kegg%>%
   arrange(desc(NES))
 ```
 
-```{r}
+```{r, echo=FALSE}
 fgseaRes_posneg_tidy%>%
   dplyr::select(-leadingEdge, -ES) %>%
   arrange(padj) %>%
   DT::datatable(caption = 'Table 1: Hallmark genes with 123pos vs 123neg.')
 ```
 
-```{r}
+```{r, echo=FALSE}
 fgseaRes_posneg_kegg_tidy%>%
   dplyr::select(-leadingEdge, -ES) %>%
   arrange(padj) %>%
   DT::datatable(caption = 'Table 1: KEGG pathways with 123pos vs 123neg.')
 ```
-```{r}
+```{r, echo=FALSE}
 fgseaRes_posbulk_tidy%>%
   dplyr::select(-leadingEdge, -ES) %>%
   arrange(padj) %>%
   DT::datatable(caption = 'Table 1: Hallmark genes with 123pos vs bulk.')
 ```
 
-```{r}
+```{r, echo=FALSE}
 fgseaRes_posbulk_kegg_tidy%>%
   dplyr::select(-leadingEdge, -ES) %>%
   arrange(padj) %>%
   DT::datatable(caption = 'Table 1: KEGG pathways with 123pos vs bulk.')
 ```
 
-```{r}
+```{r, echo=FALSE}
 fgseaRes_negbulk_tidy%>%
   dplyr::select(-leadingEdge, -ES) %>%
   arrange(padj) %>%
   DT::datatable(caption = 'Table 1: Hallmark genes with 123neg vs bulk.')
 ```
 
-```{r}
+```{r, echo=FALSE}
 fgseaRes_posneg_kegg_tidy%>%
   dplyr::select(-leadingEdge, -ES) %>%
   arrange(padj) %>%
   DT::datatable(caption = 'Table 1: KEGG pathways with 123neg vs bulk.')
 ```
 
-```{r, fig.width= 6, fig.height=8}
+```{r, echo=FALSE, fig.width= 6, fig.height=8}
 ggplot(fgseaRes_posneg_tidy, aes(reorder(pathway, NES), NES)) +
   geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
@@ -464,7 +464,7 @@ ggplot(fgseaRes_posneg_tidy, aes(reorder(pathway, NES), NES)) +
        title="Hallmark pathways NES from GSEA 123pos vs 123neg") + 
   theme_minimal()
 ```
-```{r, fig.width= 8, fig.height=16}
+```{r, echo=FALSE, fig.width= 8, fig.height=16}
 ggplot(fgseaRes_posneg_kegg_tidy, aes(reorder(pathway, NES), NES)) +
   geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
@@ -473,7 +473,7 @@ ggplot(fgseaRes_posneg_kegg_tidy, aes(reorder(pathway, NES), NES)) +
   theme_minimal()
 ```
 
-```{r, fig.width= 6, fig.height=8}
+```{r, echo=FALSE, fig.width= 6, fig.height=8}
 ggplot(fgseaRes_posbulk_tidy, aes(reorder(pathway, NES), NES)) +
   geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
@@ -482,7 +482,7 @@ ggplot(fgseaRes_posbulk_tidy, aes(reorder(pathway, NES), NES)) +
   theme_minimal()
 ```
 
-```{r, fig.width= 8, fig.height=16}
+```{r, echo=FALSE, fig.width= 8, fig.height=16}
 ggplot(fgseaRes_posbulk_kegg_tidy, aes(reorder(pathway, NES), NES)) +
   geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
@@ -491,7 +491,7 @@ ggplot(fgseaRes_posbulk_kegg_tidy, aes(reorder(pathway, NES), NES)) +
   theme_minimal()
 ```
 
-```{r, fig.width= 6, fig.height=8}
+```{r, echo=FALSE, fig.width= 6, fig.height=8}
 ggplot(fgseaRes_negbulk_tidy, aes(reorder(pathway, NES), NES)) +
   geom_col(aes(fill=padj<0.1)) +
   coord_flip() +
@@ -500,7 +500,7 @@ ggplot(fgseaRes_negbulk_tidy, aes(reorder(pathway, NES), NES)) +
   theme_minimal()
 ```
 
-```{r, fig.width= 8, fig.height=16}
+```{r, echo=FALSE, fig.width= 8, fig.height=16}
 ggplot(fgseaRes_negbulk_kegg_tidy, aes(reorder(pathway, NES), NES)) +
   geom_col(aes(fill=padj<0.1)) +
   coord_flip() +

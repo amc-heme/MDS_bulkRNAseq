@@ -37,6 +37,7 @@ library(VennDiagram)
 library(UpSetR)
 library(wesanderson)
 library(kableExtra)
+library(reshape)
 ```
 
 
@@ -60,6 +61,7 @@ kable(starting_metrics, caption="Summary of Data Metrics")
 
 
 ```
+This table shows that there are relatively high duplication levels in these samples.  This likely indicates that the input was low or too many PCR cycles were performed.  
 
 ## Summary of Data prior to analysis
 
@@ -99,12 +101,14 @@ rna.counts<-as.data.frame(t(slice_tail(counts.rRNA)))
 rna.counts <-merge(rna.counts,sums,by='row.names',all=TRUE)
 rna.counts<-mutate(rna.counts, "percentrRNA"= (rRNA_45S_NR145819 /sums)*100 )
 names(rna.counts)[1] <- 'SampleName'
-rna.counts<-select(rna.counts, c("SampleName", "percentrRNA"))
+rna.counts<-dplyr::select(rna.counts, c("SampleName", "percentrRNA"))
 metadata<-dplyr::full_join(metadata,rna.counts, by="SampleName")
 metadata$percentrRNA <- round(metadata$percentrRNA ,digit=2)
 kbl(metadata, booktabs=T, caption="Metadata Table") %>%
   kable_styling(latex_options=c("striped", "scale_down"))
 ```
+There was little rRNA contamination in these samples.  This is expected as these are from polyA selected libraries.  
+
 
 ```{r, echo=FALSE}
 expressed_genes<-tpms %>% filter_all(all_vars(. > 5))
@@ -120,6 +124,7 @@ cols.cor<-cor(expressed_genes, method="spearman")
 
 pheatmap(cols.cor, method="spearman")
 ```
+We see higher corrlation between samples than between treatments.  This is expected for patient data.  
 
 ## PCA plot
 
@@ -135,13 +140,13 @@ exp.pca.pc <- data.frame(exp.pca$x, sample = colnames(expressed_genes))
 pc_loadings<-exp.pca$rotation %>%
   as_tibble(rownames="ensembl_gene_id")
 top_loading_pc1<-pc_loadings %>%
-  select(ensembl_gene_id, PC1) %>%
+  dplyr::select(ensembl_gene_id, PC1) %>%
   arrange(desc(abs(PC1)))%>%
   inner_join(ens2gene, by="ensembl_gene_id") %>%
   head(n=10)
 
   top_loading_pc2<-pc_loadings %>%
-  select(ensembl_gene_id, PC2) %>%
+  dplyr::select(ensembl_gene_id, PC2) %>%
   arrange(desc(abs(PC2)))%>%
   inner_join(ens2gene, by="ensembl_gene_id") %>%
   head(n=10)
@@ -161,7 +166,7 @@ ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$cellType, shape=metadata
   geom_text_repel(aes(label=metadata$SampleName), size=3, max.overlaps = Inf)+
   ggtitle("Expressed Genes in All Samples > 5 TPM") 
 ```
-We see a stronger correlation between patient than between sample type.  One principle component is seperating on patient while the other is separating based on sample type.  
+We see a stronger correlation between patient than between sample type.  PC1 is seperating the patients and the major loadings of this component are IFI30, HBB, MGST1, AHSP, and CREM.  PC2 is separating based on treatment and the major loadings of this component are FOS, IGHM, PUF60, SLC25A6, and ICAM.  
 
 ##  Run Differential Expression testing using DESeq2 and Calculate Gene Set Enrichment
 ### Compare 123pos vs 123neg, 123neg vs bulk, and 123pos vs bulk 
@@ -225,7 +230,7 @@ ens2gene <- unique(ens2gene)
 DEG_filtered<-as.data.frame(res_123vs123HHT_filtered)
 DGE_filter<-filter(DEG_filtered, padj<.01)
 DGE_filter<-rownames_to_column(DGE_filter, var="ensembl_gene_id")
-DGE_filter<-right_join(ens2gene,DGE_filter, by="ensembl_gene_id") %>% select(external_gene_name, padj, pvalue,log2FoldChange)
+DGE_filter<-right_join(ens2gene,DGE_filter, by="ensembl_gene_id") %>% dplyr::select(external_gene_name, padj, pvalue,log2FoldChange)
 DGE_filter<-arrange(DGE_filter, padj) 
 DGE_filter$padj<-formatC(DGE_filter$padj, format = "e", digits = 2)
 DGE_filter$pvalue<-formatC(DGE_filter$pvalue, format = "e", digits = 2)
@@ -234,6 +239,8 @@ DGE_filter$log2FoldChange<-round(DGE_filter$log2FoldChange, digits = 2)
 #DGE_filter$padj<-format(DGE_filter$padj, digits=3)
 #DGE_filter$pvalue<-format(DGE_filter$pvalue, digits=3)
 #DGE_filter$log2FoldChange<-format(DGE_filter$log2FoldChange, digits=3)
+
+plotDispEsts(dds.filtered)
 ```
 
 ```{r, echo=FALSE}
@@ -242,6 +249,31 @@ kbl(DGE_filter, booktabs = T, longtable = TRUE, caption = "Genes with padj value
   scroll_box(width = "600px", height = "500px")
 ```
 
+Table showing the 132 genes with significant BH adjusted p- value of <.01.  
+
+### Top 20 DEG plots
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+top_20_genes<-(DGE_filter[1:20, 1])
+normalized_counts <- counts(dds.filtered, normalized=T)
+normalized_counts<-as.data.frame(normalized_counts)
+normalized_counts<-rownames_to_column(normalized_counts, var="ensembl_gene_id")
+normalized_counts<-inner_join(normalized_counts, ens2gene, by="ensembl_gene_id")
+
+normalized_counts<-dplyr::select(normalized_counts, external_gene_name, HTB336_CD123_pos, HTB336_CD123_pos_HHT, HTB61_CD123, HTB61_CD132_HHT)
+top20_norm_counts <- filter(normalized_counts, external_gene_name %in% top_20_genes)
+melted_top20_norm_counts <- data.frame(melt(top20_norm_counts))
+colnames(melted_top20_norm_counts)<-c("gene", "SampleName", "normalized_counts")
+melted_top20_norm_counts<-full_join(melted_top20_norm_counts,metadata, by="SampleName")
+ggplot(melted_top20_norm_counts) +
+        geom_point(aes(x = gene, y = normalized_counts, color = cellType)) +
+        scale_y_log10() +
+        xlab("Genes") +
+        ylab("Normalized Counts") +
+        ggtitle("Top 20 Significant DE Genes") +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+	theme(plot.title=element_text(hjust=0.5))
+```
 
 ### Volcano Plot
 ```{r, echo=FALSE, warning=FALSE, fig.width= 10, fig.height=6}
@@ -291,13 +323,13 @@ alt_col_values=c("#88CCEE", "#CC6677", "#DDCC77")
 pc_loadings<-pca$rotation %>%
   as_tibble(rownames="ensembl_gene_id")
 top_loading_pc1<-as.data.frame(pc_loadings) %>%
-  select(ensembl_gene_id, PC1) %>%
+  dplyr::select(ensembl_gene_id, PC1) %>%
   arrange(desc(abs(PC1)))%>%
   inner_join(ens2gene, by="ensembl_gene_id")%>%
   head(n=10)
 
 top_loading_pc2<-pc_loadings %>%
-  select(ensembl_gene_id, PC2) %>%
+  dplyr::select(ensembl_gene_id, PC2) %>%
   arrange(desc(abs(PC2)))%>%
   inner_join(ens2gene, by="ensembl_gene_id") %>%
   head(n=10)
@@ -311,6 +343,8 @@ ggplot(pca_df, aes(PC1, PC2, color=type, shape=metadata$patient))+geom_point(siz
   scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
   ggtitle("PCA of normalized data")
 ```
+
+This PCA plot shows the first 2 principle components following normalization with DEseq2.  Again we see PC1 separating by the patient with the top gene loadings of KYNU, MTC01P12, SLAMF7, CCL7, and PPBP.  The PC2 is separating on the treatment and the top gene loadings are LRPAP, FOS, TM4SF1, HBA1/2, and WASH5P.  
 
 ```{r gsea, echo=FALSE, warning=FALSE}
 ##pull gene names for gsea analysis
@@ -347,7 +381,7 @@ fgseaRes_posHHT_kegg_tidy <-fgsea_posHHT_KEGG%>%
   arrange(desc(NES))
 ```
 
-##Displaying a table of ordered pathways
+## Displaying a table of ordered pathways
 
 ```{r, echo=FALSE, warning=FALSE}
 fgseaRes_posHHT_tidy%>%
@@ -362,7 +396,7 @@ fgseaRes_posHHT_kegg_tidy%>%
   arrange(padj) %>%
   DT::datatable(caption = 'Table 1: KEGG pathway genes with 123pos vs 123posHHT.')
 ```
-#plot the waterfall results
+# plot the waterfall results
 
 ```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=8}
 ggplot(fgseaRes_posHHT_tidy, aes(reorder(pathway, NES), NES)) +
@@ -403,8 +437,9 @@ ggplot(toplotMoustache, aes(x = NES, y = padj)) +
   xlab('NES') + 
   ylab('BH adjusted p-value') +
   ggtitle("Hallmark pathways from GSEA") +
-  geom_text_repel(aes(label=ifelse(padj<0.05,as.character(pathway),"")),hjust=0,vjust=0) +
-  coord_cartesian(xlim = c(-3, 3), ylim = c(-0.1, 1))
+  geom_text_repel(aes(label=ifelse(padj<0.01,as.character(pathway),"")),hjust=-.5,vjust=-.5, size=1.5, max.overlaps = Inf) +
+  labs(title = "Moustache plot of Hallmark pathways")+
+  coord_cartesian(xlim = c(-4, 3), ylim = c(-0.1, 1),clip="off")
 ```
 
 ##repeating with KEGG pathways
@@ -428,8 +463,8 @@ ggplot(toplotMoustache_kegg, aes(x = NES, y = padj)) +
   xlab('NES') + 
   ylab('BH adjusted p-value') +
   ggtitle("Kegg pathways from GSEA") +
-  geom_text_repel(aes(label=ifelse(padj<0.05,as.character(pathway),"")),hjust=0,vjust=0) +
-  coord_cartesian(xlim = c(-3, 3), ylim = c(-0.1, 1))
+  geom_text_repel(aes(label=ifelse(padj<0.05,as.character(pathway),"")),hjust=.5,vjust=0, size=1.5, max.overlaps = Inf )+
+  coord_cartesian(xlim = c(-4, 4), ylim = c(-0.1, 1))
 ```
 
 ```{r, include=T, message=F, warning=FALSE, echo=FALSE}
@@ -445,20 +480,18 @@ topPathways_kegg <- c(topPathwaysUp_kegg, rev(topPathwaysDown_kegg))
 ```
 
 #### __Top Up and Down Ranked Pathways hallmark__
-```{r, echo=FALSE, warning=FALSE, fig.width= 8, fig.height=4.5, fig.align='center'}
+```{r, echo=FALSE, warning=FALSE, fig.width= 9, fig.height=5, fig.align='center'}
 plotGseaTable(pathways.hallmark[topPathways], rank_posHHT, fgsea_posHHT_hallmark, 
-              gseaParam=0.5)
+              gseaParam=0.5, colwidths = c(7, 3, 0.8, 1.0, 1.0))
 ```
 
 #### __Top Up and Down Ranked Pathways kegg __
-```{r, echo=FALSE, warning=FALSE, fig.width= 8, fig.height=4.5, fig.align='center'}
+```{r, echo=FALSE, warning=FALSE, fig.width= 9, fig.height=5, fig.align='center'}
 plotGseaTable(pathways.kegg[topPathways_kegg], rank_posHHT, fgsea_posHHT_KEGG, 
-              gseaParam=0.5)
-
-plotGseaTable(pathways.kegg[topPathways_kegg], rank_posHHT, fgsea_posHHT_KEGG, gseaParam = 0.5)
+              gseaParam=0.5, colwidths = c(7, 3, 0.8, 1.0, 1.0))
 ```
 
-#### __Top ranked pathway hallmark__
+#### __Top ranked pathways hallmark__
 **I can do this for any of interest, just let me know**
 ```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
 top.path <- as.character(fgseaRes_posHHT_tidy[1,1])
@@ -466,11 +499,45 @@ plotEnrichment(pathways.hallmark[[top.path]],
                rank_posHHT) + labs(title=top.path)
 ```
 
-#### __Top ranked pathway kegg__
+```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
+top.path <- as.character(fgseaRes_posHHT_tidy[50,1])
+plotEnrichment(pathways.hallmark[[top.path]],
+               rank_posHHT) + labs(title=top.path)
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
+top.path <- as.character(fgseaRes_posHHT_tidy[49,1])
+plotEnrichment(pathways.hallmark[[top.path]],
+               rank_posHHT) + labs(title=top.path)
+```
+
+#### __Top ranked pathways kegg__
 **I can do this for any of interest, just let me know**
 ```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
 top.path <- as.character(fgseaRes_posHHT_kegg_tidy[1,1])
 plotEnrichment(pathways.kegg[[top.path]],
                rank_posHHT) + labs(title=top.path)
 ```
+```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
+top.path <- as.character(fgseaRes_posHHT_kegg_tidy[2,1])
+plotEnrichment(pathways.kegg[[top.path]],
+               rank_posHHT) + labs(title=top.path)
+```
 
+```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
+top.path <- as.character(fgseaRes_posHHT_kegg_tidy[185,1])
+plotEnrichment(pathways.kegg[[top.path]],
+               rank_posHHT) + labs(title=top.path)
+```
+
+
+```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=4.5, fig.align='center'}
+top.path <- as.character(fgseaRes_posHHT_kegg_tidy[186,1])
+plotEnrichment(pathways.kegg[[top.path]],
+               rank_posHHT) + labs(title=top.path)
+```
+## Session Information
+
+```{r}
+sessionInfo()
+```
