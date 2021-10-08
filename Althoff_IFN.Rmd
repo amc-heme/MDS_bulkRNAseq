@@ -1,0 +1,259 @@
+---
+title: "Althoff_IFN"
+author: "Monica Ransom"
+date: "10/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This analysis is to look at why Scribble KO HSC are insensitive to activating signals from interferon.  To understand this WT and Scibble KO mice are treated or not with PolyIC an interferon stimulator.  There are 4 groups here with WT, KO, WTIC, and KOIC.  There are 3 mice with untreated condition and 4 mice per treated condition.  
+
+# Pre-processing
+1.    Adapters were trimmed with FASTP 	0.21.0
+2.    Gene expression was quantified using salmon  v1.3.0
+3.    TPMs were obtained for the genes using tximport 1.20.0
+
+```{r import, message=FALSE, warning=FALSE}
+
+library(ggplot2)
+library(DESeq2)
+library(tximport)
+library(readr)
+library(tximportData)
+library(readxl)
+library(knitr)
+library(tidyverse)
+library(pheatmap)
+library(RColorBrewer)
+library(viridis)
+library(ggrepel)
+library(EnhancedVolcano)
+library(fgsea)
+library(limma)
+library(VennDiagram)
+library(UpSetR)
+library(wesanderson)
+library(kableExtra)
+library(reshape)
+library(dplyr)
+
+```
+
+# Load color palettes
+```{r, echo=FALSE, include=FALSE}
+## Define Color Scheme and plot them
+plasma <- viridis::plasma(n = 10)
+viridis <- viridis::viridis(n = 10)
+cividis <- viridis::cividis(n=10)
+magma <- viridis::magma(n=10)
+```
+
+# Load metrics
+```{r summary, echo=FALSE}
+Althoff_metrics<-read_excel("~/Desktop/Althoff results/Jordan metrics.xlsx")
+names(Althoff_metrics)[1] <- "samples"
+
+kable(Althoff_metrics, caption="Summary of Data Metrics")
+```
+This table shows that there was reasonable duplication rates in these samples.  The insert size is smaller and it aligns better with STAR than Salmon.  Many of the reads were adapter trimmed pretty extensively and both this and duplication rate probably lowered the Salmon alignment rate.  
+
+## Summary of Data prior to analysis
+
+```{r data, message=FALSE, echo=FALSE}
+#to generate a vector of names and file locations
+files<-file.path("~/Desktop/Althoff results/salmon/", list.files("~/Desktop/Althoff results/salmon/"), "quant.sf")
+names(files)<-list.files("~/Desktop/Althoff results/salmon")
+
+mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = "mmusculus_gene_ensembl", host='www.ensembl.org')
+t2g_mm <- biomaRt::getBM(attributes = c('ensembl_transcript_id', 'ensembl_gene_id', 'external_gene_name', 'refseq_mrna'), mart = mart)
+tx2gene <- t2g_mm[,c(1,2)]
+
+ens2gene<-t2g_mm[,c(2,3)]
+colnames(ens2gene)[2] <- 'Gene'
+ens2gene <- unique(ens2gene)
+
+# import transcript level counts
+txi.salmon.t<-tximport(files, type="salmon", txOut=TRUE)
+txi.salmon.g<-tximport(files=files, type="salmon", tx2gene= tx2gene, ignoreTxVersion = TRUE, countsFromAbundance = 'lengthScaledTPM' )
+
+# Extract counts only
+counts <- txi.salmon.g$counts %>%
+  as.data.frame()
+#Extract TPM
+tpms <- data.frame(txi.salmon.g$abundance)
+
+metadata<-read_excel("~/Desktop/Althoff results/meta.xlsx")
+sums<-colSums(txi.salmon.g$counts)
+sums<-as.data.frame(sums)
+counts<-as.data.frame(txi.salmon.g$counts)
+kbl(metadata, booktabs=T, caption="Metadata Table") %>%
+  kable_styling(latex_options=c("striped", "scale_down"))
+```
+
+# Calculate the number of genes with greater than 5 counts in all samples
+
+```{r, echo=FALSE}
+expressed_genes<-tpms %>% filter_all(all_vars(. > 5))
+
+```
+
+There are 6819 genes with greater than 5 counts in all samples.
+
+## Sample Heatmap and Correlation matrix
+```{r All samples Heatmap, echo=FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+## what we see here shows that patients cluster more closely than the cell types and this will need to be accounted for in the DGE
+pheatmap(expressed_genes, scale="row")
+cols.cor<-cor(expressed_genes, method="spearman")
+
+pheatmap(cols.cor, method="spearman")
+```
+
+We see high correlation between all samples that were treated regardless of phenotype.  In the untreated samples there was less correlation this may be due to the mouse variability.
+
+# PCA plot of non-normalized data
+
+```{r pca plot, message=FALSE, echo=FALSE}
+exp.pca <- prcomp(t(log2(expressed_genes)))
+exp.pca.summary <- summary(exp.pca)$importance
+pc1var = round(exp.pca.summary[3,1] * 100, 1)
+pc2var = round(exp.pca.summary[3,2] * 100 - pc1var, 1)
+exp.pca.pc <- data.frame(exp.pca$x, sample = colnames(expressed_genes))
+
+pc_loadings<-exp.pca$rotation %>%
+  as_tibble(rownames="ensembl_gene_id")
+top_loading_pc1<-pc_loadings %>%
+  dplyr::select(ensembl_gene_id, PC1) %>%
+  arrange(desc(abs(PC1)))%>%
+  inner_join(ens2gene, by="ensembl_gene_id") %>%
+  head(n=10)
+
+  top_loading_pc2<-pc_loadings %>%
+  dplyr::select(ensembl_gene_id, PC2) %>%
+  arrange(desc(abs(PC2)))%>%
+  inner_join(ens2gene, by="ensembl_gene_id") %>%
+  head(n=10)
+
+```
+
+### PC1 vs PC2
+```{r, All samples PCA 1 vs 2, echo = FALSE, warning=FALSE,  fig.width= 6, fig.height=4.5, fig.align='center'}
+
+colors <- c(viridis[6], cividis[9], magma[6])
+ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$Mouse_genotype, shape=metadata$treatment)) +
+  geom_point(size = 5)+
+  scale_fill_manual(values = alpha(colors, 1) ) + 
+  xlab(paste('PC1,', pc1var, '% explained var.')) +
+  ylab(paste('PC2,', pc2var, '% explained var.')) +
+  guides(fill=guide_legend(override.aes = list(color=colors))) +
+  geom_text_repel(aes(label=metadata$Sample), size=3, max.overlaps = Inf)+
+  ggtitle("Expressed Genes in All Samples > 5 TPM") 
+```
+This doesn't seem to match the correlation data which indicated that the treated samples were more similar to each other.
+
+##  Run Differential Expression testing using DESeq2 and Calculate Gene Set Enrichment
+### Compare 123pos vs 123neg, 123neg vs bulk, and 123pos vs bulk 
+#### sig = padj <0.01 and abs(l2fc) >0.5
+
+```{r DGE, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+coldata<-metadata
+coldata<-column_to_rownames(coldata, 'Sample')
+## need to confirm that all names are in the same order
+all(rownames(coldata) %in% colnames(txi.salmon.g$counts))
+all(rownames(coldata) == colnames(txi.salmon.g$counts))
+coldata<-coldata[colnames(txi.salmon.g$counts),]
+all(rownames(coldata) == colnames(txi.salmon.g$counts))
+
+dds <- DESeqDataSetFromTximport(txi.salmon.g,
+                              colData = coldata,
+                              design = ~ Mouse_genotype + treatment+ Mouse_genotype:treatment)
+
+dds$Mouse_genotype = relevel( dds$Mouse_genotype, "WT")
+dds<-estimateSizeFactors(dds)
+sf<-as.data.frame(dds$sizeFactor)
+
+### unfiltered data
+dds.unfiltered <- DESeq(dds)
+res.unfiltered <- results( dds.unfiltered)
+
+##filtered data changed this from dds[rowMins(counts(dds))>5,] to a less stringent filtering
+keep<-rowSums(counts(dds))>=10
+#dds.filtered<-dds[rowMins(counts(dds))>5,]
+dds.filtered<-dds[keep,]
+dds.filtered<-DESeq(dds.filtered)
+res.filtered<-results(dds.filtered)
+
+## This filter lowered the number of genes from 54309 to 28543 which is about 53%
+
+#compare WT +/- treatment (WT is not mentioned because it is the reference level)
+res_WTvWTIC<-results(dds.filtered, contrast=c("treatment", "PolyIC", "none"))
+#compare KO +/- treatment 
+res_KOvKOIC<-results(dds.filtered, list(c("treatment_PolyIC_vs_none","Mouse_genotypeKO.treatmentPolyIC")))
+#compare WT and KO without treatment (control is the reference level so it doesn't have to be specified)
+res_WTvKO<-results(dds.filtered, contrast=c("Mouse_genotype", "KO", "WT"))
+#compare WT and KO with treatment
+res_WTICvKOIC<-results(dds.filtered, list(c("Mouse_genotype_KO_vs_WT", "Mouse_genotypeKO.treatmentPolyIC")))
+
+#Generate statistics
+significant_genes<-as.data.frame(c("WTvsWTIC", "WTvKO", "WTICvKOIC", "KOvKOIC"))
+names(significant_genes)[1] <- "comparison"
+
+sum(res_WTvWTIC$padj <.01 & abs(res_WTvWTIC$log2FoldChange) >= 0.5, na.rm=TRUE)
+sum(res_WTvKO$padj <.01 & abs(res_WTvKO$log2FoldChange) >= 0.5, na.rm=TRUE)
+sum(res_WTICvKOIC$padj <.01 & abs(res_WTICvKOIC$log2FoldChange) >= 0.5, na.rm=TRUE)
+sum(res_KOvKOIC$padj <.01 & abs(res_KOvKOIC$log2FoldChange) >= 0.5, na.rm=TRUE)
+
+significant_genes<-mutate(significant_genes, sig.genes=c("4316","1157","24","4347"))
+
+```
+
+## Number of genes in each comparison with pvalue <.01 and log2foldchange>.5
+```{r table}
+kable(significant_genes)
+```
+
+```{r}
+DEG_WTvKO<-as.data.frame(res_WTvKO) %>%
+  filter(padj<.01 & abs(log2FoldChange) >= .5)%>%
+  rownames_to_column(var="ensembl_gene_id")%>%
+  left_join(ens2gene,by="ensembl_gene_id")%>%
+  select(Gene, padj, pvalue, log2FoldChange)%>%
+  arrange(padj)
+
+
+DEG_WTvWTIC<-as.data.frame(res_WTvWTIC)%>%
+  filter(padj<.01 & abs(log2FoldChange) >= .5)%>%
+  rownames_to_column(var="ensembl_gene_id")%>%
+  left_join(ens2gene,by="ensembl_gene_id")%>%
+  select(Gene, padj, pvalue, log2FoldChange)%>%
+  arrange(padj)
+
+DEG_WTICvKOIC<-as.data.frame(res_WTICvKOIC)%>%
+  filter(padj<.01 & abs(log2FoldChange) >= .5)%>%
+  rownames_to_column(var="ensembl_gene_id")%>%
+  left_join(ens2gene,by="ensembl_gene_id")%>%
+  select(Gene, padj, pvalue, log2FoldChange)%>%
+  arrange(padj)
+
+DEG_KOvKOIC<-as.data.frame(res_KOvKOIC)%>%
+  filter(padj<.01 & abs(log2FoldChange) >= .5)%>%
+  rownames_to_column(var="ensembl_gene_id")%>%
+  left_join(ens2gene,by="ensembl_gene_id")%>%
+  select(Gene, padj, pvalue, log2FoldChange)%>%
+  arrange(padj)
+```
+
+```{r}
+plotDispEsts(dds.filtered)
+```
+
+## Top 20 DEG plots
+
+```{r}
+top_20_WTvKO<-DEG_WTvKO[1:20, 1]
+```
+
+
+
