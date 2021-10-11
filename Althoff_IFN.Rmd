@@ -154,7 +154,7 @@ ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$Mouse_genotype, shape=me
 This doesn't seem to match the correlation data which indicated that the treated samples were more similar to each other.
 
 ##  Run Differential Expression testing using DESeq2 and Calculate Gene Set Enrichment
-### Compare 123pos vs 123neg, 123neg vs bulk, and 123pos vs bulk 
+### Compare WTvKO, WTvWTIC, KOvKOIC, WTICvKOIC
 #### sig = padj <0.01 and abs(l2fc) >0.5
 
 ```{r DGE, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
