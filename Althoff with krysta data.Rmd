@@ -1,0 +1,450 @@
+---
+title: "Althoff w Krysta data"
+author: "Monica Ransom"
+date: "10/17/2021"
+output: html_document
+---
+
+#Althoff IFN data processing
+
+This analysis is to look at why Scribble KO HSC are insensitive to activating signals from interferon.  To understand this WT and Scibble KO mice are treated or not with PolyIC an interferon stimulator.  There are 4 groups here with WT, KO, WTIC, and KOIC.  There are 3 mice with untreated condition and 4 mice per treated condition.  
+
+# Pre-processing
+1.    Adapters were trimmed with Cutadapt
+2.    Gene expression was quantified using salmon  v1.3.0
+3.    TPMs were obtained for the genes using tximport 1.20.0
+
+```{r import, message=FALSE, warning=FALSE}
+
+library(ggplot2)
+library(DESeq2)
+library(tximport)
+library(readr)
+library(tximportData)
+library(readxl)
+library(knitr)
+library(tidyverse)
+library(pheatmap)
+library(RColorBrewer)
+library(viridis)
+library(ggrepel)
+library(EnhancedVolcano)
+library(fgsea)
+library(limma)
+library(VennDiagram)
+library(UpSetR)
+library(wesanderson)
+library(kableExtra)
+library(reshape)
+library(dplyr)
+library(msigdbr)
+
+```
+
+# Load color palettes
+```{r, echo=FALSE, include=FALSE}
+## Define Color Scheme and plot them
+plasma <- viridis::plasma(n = 10)
+viridis <- viridis::viridis(n = 10)
+cividis <- viridis::cividis(n=10)
+magma <- viridis::magma(n=10)
+```
+
+```{r data, message=FALSE, echo=FALSE}
+#to generate a vector of names and file locations
+files<-file.path("~/Desktop/Krysta/Salmon/", list.files("~/Desktop/Krysta/Salmon/"), "quant.sf")
+names(files)<-list.files("~/Desktop/Krysta/Salmon")
+mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = "mmusculus_gene_ensembl", host='www.ensembl.org')
+t2g_mm <- biomaRt::getBM(attributes = c('ensembl_transcript_id', 'ensembl_gene_id', 'external_gene_name', 'refseq_mrna'), mart = mart)
+tx2gene <- t2g_mm[,c(1,2)]
+
+ens2gene<-t2g_mm[,c(2,3)]
+colnames(ens2gene)[2] <- 'Gene'
+ens2gene <- unique(ens2gene)
+
+# import transcript level counts
+
+txi.salmon.g<-tximport(files=files, type="salmon", tx2gene= tx2gene, ignoreTxVersion = TRUE, countsFromAbundance = 'lengthScaledTPM' )
+
+# Extract counts only
+counts <- txi.salmon.g$counts %>%
+  as.data.frame()
+#Extract TPM
+tpms <- data.frame(txi.salmon.g$abundance)
+
+metadata<-read_excel("~/Desktop/Althoff results/meta2.xlsx")
+sums<-colSums(txi.salmon.g$counts)
+sums<-as.data.frame(sums)
+counts<-as.data.frame(txi.salmon.g$counts)
+kbl(metadata, booktabs=T, caption="Metadata Table") %>%
+  kable_styling(latex_options=c("striped", "scale_down"))
+```
+
+```{r, echo=FALSE}
+expressed_genes<-tpms %>% filter_all(all_vars(. > 2))
+
+```
+
+```{r All samples Heatmap, echo=FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+## what we see here shows that patients cluster more closely than the cell types and this will need to be accounted for in the DGE
+pheatmap(expressed_genes, scale="row")
+cols.cor<-cor(expressed_genes, method="spearman")
+
+pheatmap(cols.cor, method="spearman")
+```
+
+We see high correlation between all samples that were treated regardless of phenotype.  In the untreated samples there was less correlation this may be due to the mouse variability.
+
+# PCA plot of non-normalized data
+```{r pca plot, message=FALSE, echo=FALSE}
+exp.pca <- prcomp(t(log2(expressed_genes)))
+exp.pca.summary <- summary(exp.pca)$importance
+pc1var = round(exp.pca.summary[3,1] * 100, 1)
+pc2var = round(exp.pca.summary[3,2] * 100 - pc1var, 1)
+exp.pca.pc <- data.frame(exp.pca$x, sample = colnames(expressed_genes))
+
+pc_loadings<-exp.pca$rotation %>%
+  as_tibble(rownames="ensembl_gene_id")
+top_loading_pc1<-pc_loadings %>%
+  dplyr::select(ensembl_gene_id, PC1) %>%
+  arrange(desc(abs(PC1)))%>%
+  inner_join(ens2gene, by="ensembl_gene_id") %>%
+  head(n=10)
+
+  top_loading_pc2<-pc_loadings %>%
+  dplyr::select(ensembl_gene_id, PC2) %>%
+  arrange(desc(abs(PC2)))%>%
+  inner_join(ens2gene, by="ensembl_gene_id") %>%
+  head(n=10)
+
+```
+
+### PC1 vs PC2
+```{r, All samples PCA 1 vs 2, echo = FALSE, warning=FALSE,  fig.width= 6, fig.height=4.5, fig.align='center'}
+
+colors <- c(viridis[6], cividis[9], magma[6])
+ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$Condition)) +
+  geom_point(size = 5)+
+  scale_fill_manual(values = alpha(colors, 1) ) + 
+  xlab(paste('PC1,', pc1var, '% explained var.')) +
+  ylab(paste('PC2,', pc2var, '% explained var.')) +
+  guides(fill=guide_legend(override.aes = list(color=colors))) +
+  geom_text_repel(aes(label=metadata$Sample), size=3, max.overlaps = Inf)+
+  ggtitle("Expressed Genes in All Samples > 5 TPM") 
+```
+
+This doesn't seem to match the correlation data which indicated that the treated samples were more similar to each other.
+
+##  Run Differential Expression testing using DESeq2 and Calculate Gene Set Enrichment
+### Compare WTvKO, WTvWTIC, KOvKOIC, WTICvKOIC
+#### sig = padj <0.01 and abs(l2fc) >0.5
+
+```{r DGE, echo=FALSE, message=TRUE, warning=FALSE, results=TRUE}
+coldata<-metadata
+coldata<-column_to_rownames(coldata, 'Sample')
+coldata<-arrange(coldata, Condition)
+#coldata<-coldata$Condition[colnames(txi.salmon.g$counts),]
+## need to confirm that all names are in the same order
+all(rownames(coldata) %in% colnames(txi.salmon.g$counts))
+all(rownames(coldata) == colnames(txi.salmon.g$counts))
+
+
+dds <- DESeqDataSetFromTximport(txi.salmon.g,
+                              colData = coldata,
+                              design = ~ Condition)
+
+
+dds<-estimateSizeFactors(dds)
+sf<-as.data.frame(dds$sizeFactor)
+
+### unfiltered data
+dds.unfiltered <- DESeq(dds)
+res.unfiltered <- results( dds.unfiltered)
+
+##filtered data changed this from dds[rowMins(counts(dds))>5,] to a less stringent filtering
+keep<-rowSums(counts(dds))>=10
+#dds.filtered<-dds[rowMins(counts(dds))>5,]
+dds.filtered<-dds[keep,]
+dds.filtered<-DESeq(dds.filtered)
+res.filtered<-results(dds.filtered)
+
+## This filter lowered the number of genes from 54309 to 28543 which is about 53%
+
+#compare WT +/- treatment 
+res_WTvWTIC<-results(dds.filtered, contrast=c("Condition", "WT", "WTIC"))
+#compare KO +/- treatment 
+res_KOvKOIC<-results(dds.filtered, contrast=c("Condition","KO", "KOIC"))
+#compare WT and KO without treatment 
+res_WTvKO<-results(dds.filtered, contrast=c("Condition", "WT", "KO"))
+#compare WT and KO with treatment
+res_WTICvKOIC<-results(dds.filtered, contrast=c("Condition", "WTIC", "KOIC"))
+
+#Generate statistics
+significant_genes<-as.data.frame(c("WTvsWTIC", "WTvKO", "WTICvKOIC", "KOvKOIC"))
+names(significant_genes)[1] <- "comparison"
+
+sum(res_WTvWTIC$padj <.01 & abs(res_WTvWTIC$log2FoldChange) >= 0.5, na.rm=TRUE)
+sum(res_WTvKO$padj <.01 & abs(res_WTvKO$log2FoldChange) >= 0.5, na.rm=TRUE)
+sum(res_WTICvKOIC$padj <.01 & abs(res_WTICvKOIC$log2FoldChange) >= 0.5, na.rm=TRUE)
+sum(res_KOvKOIC$padj <.01 & abs(res_KOvKOIC$log2FoldChange) >= 0.5, na.rm=TRUE)
+
+significant_genes<-mutate(significant_genes, sig.genes=c("4437","1423","15","4481"))
+```
+
+```{r table}
+kable(significant_genes)
+```
+
+```{r}
+DEG_WTvKO<-as.data.frame(res_WTvKO) %>%
+  filter(padj<.01 & abs(log2FoldChange) >= .5)%>%
+  rownames_to_column(var="ensembl_gene_id")%>%
+  left_join(ens2gene,by="ensembl_gene_id")%>%
+  select(Gene, padj, pvalue, log2FoldChange)%>%
+  arrange(padj)
+
+
+DEG_WTvWTIC<-as.data.frame(res_WTvWTIC)%>%
+  filter(padj<.01 & abs(log2FoldChange) >= .5)%>%
+  rownames_to_column(var="ensembl_gene_id")%>%
+  left_join(ens2gene,by="ensembl_gene_id")%>%
+  select(Gene, padj, pvalue, log2FoldChange)%>%
+  arrange(padj)
+
+DEG_WTICvKOIC<-as.data.frame(res_WTICvKOIC)%>%
+  filter(padj<.01 & abs(log2FoldChange) >= .5)%>%
+  rownames_to_column(var="ensembl_gene_id")%>%
+  left_join(ens2gene,by="ensembl_gene_id")%>%
+  select(Gene, padj, pvalue, log2FoldChange)%>%
+  arrange(padj)
+
+DEG_KOvKOIC<-as.data.frame(res_KOvKOIC)%>%
+  filter(padj<.01 & abs(log2FoldChange) >= .5)%>%
+  rownames_to_column(var="ensembl_gene_id")%>%
+  left_join(ens2gene,by="ensembl_gene_id")%>%
+  select(Gene, padj, pvalue, log2FoldChange)%>%
+  arrange(padj)
+```
+
+```{r}
+plotDispEsts(dds.filtered)
+```
+
+# Volcano Plots
+
+```{r, echo=FALSE, fig.width=6, fig.height=4.5}
+colors <- c("black", viridis[5])
+df<-data.frame(res_WTvKO)
+df<-dplyr::mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
+ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+  geom_point() +
+  theme_light() +
+  scale_colour_manual(values = colors) +
+  ggtitle("WTvsKO")
+
+df<-data.frame(res_WTvWTIC)
+df<-dplyr::mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
+ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+  geom_point() +
+  theme_light() +
+  scale_colour_manual(values = colors) +
+  ggtitle("WTvsWTIC")
+
+df<-data.frame(res_KOvKOIC)
+df<-dplyr::mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
+ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+  geom_point() +
+  theme_light() +
+  scale_colour_manual(values = colors) +
+  ggtitle("KOvsKOIC")
+
+df<-data.frame(res_WTICvKOIC)
+df<-dplyr::mutate(df, DiffExp=pvalue<=.05 & abs(log2FoldChange) >=.5)
+ggplot(df, aes(x=log2FoldChange, y=-log10(padj), color=DiffExp)) + 
+  geom_point() +
+  theme_light() +
+  scale_colour_manual(values = colors) +
+  ggtitle("WTICvsKOIC")
+```
+
+## MA Plots
+
+```{r, echo=FALSE, fig.width= 6, fig.height=4.5}
+DESeq2::plotMA(res_WTvKO, main="MA plot for WT vs KO", ylim=c(-6,6) )
+DESeq2::plotMA(res_WTvWTIC, main="MA plot for WT vs WTIC", ylim=c(-6,6) )
+DESeq2::plotMA(res_KOvKOIC, main="MA plot for KO vs KOIC", ylim=c(-6,6) )
+DESeq2::plotMA(res_WTICvKOIC, main="MA plot for WTIC vs KOIC", ylim=c(-6,6) )
+```
+
+## PCA analysis
+
+```{r, echo=FALSE}
+pca_data2<-vst(dds.filtered, blind=T)
+ntop=500
+rv <- rowVars(assay(pca_data2))
+select <- order(rv, decreasing=TRUE)[seq_len(min(ntop, length(rv)))]
+pca2 <- prcomp(t(assay(pca_data2)[select,]))
+percentVar4 <- data.frame(percentVar=pca2$sdev^2/sum(pca2$sdev^2))%>%
+  mutate(pc=1:n())%>%dplyr::select(pc, percentVar)
+pca_df2<-pca2$x%>%data.frame()%>%mutate(Mouse_genotype=metadata$Mouse_genotype)
+
+alt_col_values<- c(viridis[2], viridis[6], plasma[5], plasma[10])
+
+ggplot(pca_df2, aes(PC1, PC2, color=metadata$Condition))+geom_point(size=3)+
+  xlab(paste0("PC1: ",round(percentVar4$percentVar[1] * 100), "% variance")) + 
+  ylab(paste0("PC2: ", round(percentVar4$percentVar[2] * 100), "% variance"))+
+  scale_color_manual(values=alt_col_values)+labs(color="")+theme_bw()+
+  ggtitle("PCA of analyzed data using filtered data")
+```
+
+## Top 20 DEG plots
+
+```{r}
+top_20_WTvKO<-DEG_WTvKO[1:20, 1]
+top_20_WTvWTIC<-DEG_WTvWTIC[1:20, 1]
+top_20_KOvKOIC<-DEG_KOvKOIC[1:20, 1]
+top_20_WTICvKOIC<-DEG_WTvWTIC[1:20, 1]
+
+normalized_counts <- counts(dds.filtered, normalized=T)
+normalized_counts<-as.data.frame(normalized_counts)
+normalized_counts<-rownames_to_column(normalized_counts, var="ensembl_gene_id")
+normalized_counts<-inner_join(normalized_counts, ens2gene, by="ensembl_gene_id")
+
+
+top20_norm_counts_WTvKO <- filter(normalized_counts, Gene %in% top_20_WTvKO)%>%
+  select(Gene, WT_rep1, WT_rep2, WT_rep3, KO_rep1, KO_rep2, KO_rep3)
+## stopped here there is something wrong
+melted_top20_norm_counts_WTvKO <- data.frame(melt(top20_norm_counts_WTvKO))
+colnames(melted_top20_norm_counts_WTvKO)<-c("Gene", "Sample", "normalized_counts")
+melted_top20_norm_counts_WTvKO<-full_join(melted_top20_norm_counts_WTvKO,metadata, by="Sample")
+melted_top20_norm_counts_WTvKO<-filter(melted_top20_norm_counts_WTvKO, Condition!=c("WTIC", "KOIC"))
+ggplot(melted_top20_norm_counts_WTvKO) +
+        geom_point(aes(x = Gene, y = normalized_counts, color = Condition)) +
+        scale_y_log10() +
+        xlab("Genes") +
+        ylab("Normalized Counts") +
+        ggtitle("Top 20 Significant DE Genes") +
+        theme_bw() +
+	theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+	theme(plot.title=element_text(hjust=0.5))
+```
+
+```{r}
+kable(top20_norm_counts_WTvKO)
+```
+
+```{r}
+ens2gene <- unique(ens2gene)
+#pulls the hallmark gene set for mouse
+h_gene_sets_mouse = msigdbr(species = "mouse", category = "H")
+mouse.hallmark.list = base::split(x = h_gene_sets_mouse$gene_symbol, f = h_gene_sets_mouse$gs_name)
+
+#tidying data
+
+WTvKO_gsea<-results(dds.filtered, contrast=c("Condition", "WT", "KO"),tidy=TRUE)
+colnames(WTvKO_gsea)[1]<-"ensembl_gene_id"
+WTvKO_gsea<-inner_join(WTvKO_gsea, ens2gene, by="ensembl_gene_id")
+WTvKO_gsea_sum<-WTvKO_gsea%>%
+  dplyr::select(Gene, stat) %>%
+  na.omit() %>%
+  distinct() %>%
+  group_by(Gene) %>%
+  summarise(stat=mean(stat))
+
+rank_posWTvKO<-deframe(WTvKO_gsea_sum)
+fgsea_posWTvKO_hallmark<- fgsea(pathways=mouse.hallmark.list, stats=rank_posWTvKO)
+
+fgseaRes_posWTvKO_tidy <-fgsea_posWTvKO_hallmark%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+WTvWTIC_gsea<-results(dds.filtered, contrast=c("Condition", "WT", "WTIC"), tidy=TRUE)
+colnames(WTvWTIC_gsea)[1]<-"ensembl_gene_id"
+WTvWTIC_gsea<-inner_join(WTvWTIC_gsea, ens2gene, by="ensembl_gene_id")
+WTvWTIC_gsea_sum<-WTvWTIC_gsea%>%
+  dplyr::select(Gene, stat) %>%
+  na.omit() %>%
+  distinct() %>%
+  group_by(Gene) %>%
+  summarise(stat=mean(stat))
+
+rank_posWTvWTIC<-deframe(WTvWTIC_gsea_sum)
+fgsea_posWTvWTIC_hallmark<- fgsea(pathways=mouse.hallmark.list, stats=rank_posWTvWTIC)
+
+fgseaRes_posWTvWTIC_tidy <-fgsea_posWTvWTIC_hallmark%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+KOvKOIC_gsea<-results(dds.filtered, contrast=c("Condition","KO", "KOIC"),tidy=TRUE)
+colnames(KOvKOIC_gsea)[1]<-"ensembl_gene_id"
+KOvKOIC_gsea<-inner_join(KOvKOIC_gsea, ens2gene, by="ensembl_gene_id")
+KOvKOIC_gsea_sum<-KOvKOIC_gsea%>%
+  dplyr::select(Gene, stat) %>%
+  na.omit() %>%
+  distinct() %>%
+  group_by(Gene) %>%
+  summarise(stat=mean(stat))
+
+rank_posKOvKOIC<-deframe(KOvKOIC_gsea_sum)
+fgsea_posKOvKOIC_hallmark<- fgsea(pathways=mouse.hallmark.list, stats=rank_posKOvKOIC)
+
+fgseaRes_posKOvKOIC_tidy <-fgsea_posKOvKOIC_hallmark%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+WTICvKOIC_gsea<-results(dds.filtered, contrast=c("Condition", "WTIC", "KOIC"),tidy=TRUE)
+colnames(WTICvKOIC_gsea)[1]<-"ensembl_gene_id"
+WTICvKOIC_gsea<-inner_join(WTICvKOIC_gsea, ens2gene, by="ensembl_gene_id")
+WTICvKOIC_gsea_sum<-WTICvKOIC_gsea%>%
+  dplyr::select(Gene, stat) %>%
+  na.omit() %>%
+  distinct() %>%
+  group_by(Gene) %>%
+  summarise(stat=mean(stat))
+
+rank_posWTICvKOIC<-deframe(WTICvKOIC_gsea_sum)
+fgsea_posWTICvKOIC_hallmark<- fgsea(pathways=mouse.hallmark.list, stats=rank_posWTICvKOIC)
+
+fgseaRes_posWTICvKOIC_tidy <-fgsea_posWTICvKOIC_hallmark%>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+fgseaRes_posWTvKO_tidy%>%
+  dplyr::select(-leadingEdge, -ES) %>%
+  arrange(padj) %>%
+  DT::datatable(caption = 'Table 1: Hallmark genes with WT v KO.')
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.width= 6, fig.height=8}
+ggplot(fgseaRes_posWTvKO_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.01)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA WT v KO") + 
+  theme_minimal()
+
+ggplot(fgseaRes_posWTvWTIC_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.01)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA WT v WTIC") + 
+  theme_minimal()
+
+ggplot(fgseaRes_posKOvKOIC_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.01)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA KO v KOIC") + 
+  theme_minimal()
+
+ggplot(fgseaRes_posWTICvKOIC_tidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.01)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA WTIC v KOIC") + 
+  theme_minimal()
+```
+
