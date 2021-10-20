@@ -55,7 +55,7 @@ magma <- viridis::magma(n=10)
 files<-file.path("~/Desktop/Krysta/Salmon/", list.files("~/Desktop/Krysta/Salmon/"), "quant.sf")
 names(files)<-list.files("~/Desktop/Krysta/Salmon")
 mart <- biomaRt::useMart("ENSEMBL_MART_ENSEMBL", dataset = "mmusculus_gene_ensembl", host='www.ensembl.org')
-t2g_mm <- biomaRt::getBM(attributes = c('ensembl_transcript_id', 'ensembl_gene_id', 'external_gene_name', 'refseq_mrna'), mart = mart)
+t2g_mm <- biomaRt::getBM(attributes = c('ensembl_transcript_id', 'ensembl_gene_id', 'external_gene_name', 'entrezgene_description', 'gene_biotype'), mart = mart)
 tx2gene <- t2g_mm[,c(1,2)]
 
 ens2gene<-t2g_mm[,c(2,3)]
@@ -64,7 +64,7 @@ ens2gene <- unique(ens2gene)
 
 # import transcript level counts
 
-txi.salmon.g<-tximport(files=files, type="salmon", tx2gene= tx2gene, ignoreTxVersion = TRUE, countsFromAbundance = 'lengthScaledTPM' )
+txi.salmon.g<-tximport(files=files, type="salmon", tx2gene= tx2gene,  countsFromAbundance = 'lengthScaledTPM' , ignoreTxVersion = TRUE)
 
 # Extract counts only
 counts <- txi.salmon.g$counts %>%
@@ -81,7 +81,7 @@ kbl(metadata, booktabs=T, caption="Metadata Table") %>%
 ```
 
 ```{r, echo=FALSE}
-expressed_genes<-tpms %>% filter_all(all_vars(. > 2))
+expressed_genes<-tpms %>% filter_all(all_vars(. >= 5))
 
 ```
 
@@ -122,14 +122,14 @@ top_loading_pc1<-pc_loadings %>%
 ### PC1 vs PC2
 ```{r, All samples PCA 1 vs 2, echo = FALSE, warning=FALSE,  fig.width= 6, fig.height=4.5, fig.align='center'}
 
-colors <- c(viridis[6], cividis[9], magma[6])
+colors <- c(viridis[6], cividis[9], magma[6], magma[9])
 ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$Condition)) +
   geom_point(size = 5)+
   scale_fill_manual(values = alpha(colors, 1) ) + 
   xlab(paste('PC1,', pc1var, '% explained var.')) +
   ylab(paste('PC2,', pc2var, '% explained var.')) +
   guides(fill=guide_legend(override.aes = list(color=colors))) +
-  geom_text_repel(aes(label=metadata$Sample), size=3, max.overlaps = Inf)+
+  geom_text_repel(aes(label=sample), size=3, max.overlaps = Inf)+
   ggtitle("Expressed Genes in All Samples > 5 TPM") 
 ```
 
@@ -205,7 +205,7 @@ DEG_WTvKO<-as.data.frame(res_WTvKO) %>%
 
 
 DEG_WTvWTIC<-as.data.frame(res_WTvWTIC)%>%
-  filter(padj<.01 & abs(log2FoldChange) >= .5)%>%
+  filter(padj<.05 & abs(log2FoldChange) >= .5)%>%
   rownames_to_column(var="ensembl_gene_id")%>%
   left_join(ens2gene,by="ensembl_gene_id")%>%
   select(Gene, padj, pvalue, log2FoldChange)%>%
@@ -331,6 +331,15 @@ ggplot(melted_top20_norm_counts_WTvKO) +
 
 ```{r}
 kable(top20_norm_counts_WTvKO)
+```
+
+```{r}
+#Looking at the Scribble gene which is the KO in this scenario
+filter(ens2gene, Gene=="Scrib")
+plotCounts(dds.filtered, gene="ENSMUSG00000022568", intgroup="Condition")
+x<-subset(tpms, rownames(tpms)=="ENSMUSG00000022568")
+xlong<-pivot_longer(x, cols=KO_rep1:WTIC_rep4, names_to="name")
+ggplot(data=xlong)+geom_col(aes(x=name, y=value), fill=c("blue","blue","blue","red","red","red","red","yellow","yellow","yellow","green","green","green","green"))+theme(axis.text.x=element_text(angle = 75, vjust = 0.5))
 ```
 
 ```{r}

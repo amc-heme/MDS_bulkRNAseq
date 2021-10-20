@@ -97,7 +97,7 @@ kbl(metadata, booktabs=T, caption="Metadata Table") %>%
 # Calculate the number of genes with greater than 5 counts in all samples
 
 ```{r, echo=FALSE}
-expressed_genes<-tpms %>% filter_all(all_vars(. > 5))
+expressed_genes<-tpms %>% filter_all(all_vars(. >= 5))
 
 ```
 
@@ -149,7 +149,7 @@ ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$Mouse_genotype, shape=me
   xlab(paste('PC1,', pc1var, '% explained var.')) +
   ylab(paste('PC2,', pc2var, '% explained var.')) +
   guides(fill=guide_legend(override.aes = list(color=colors))) +
-  geom_text_repel(aes(label=metadata$Sample), size=3, max.overlaps = Inf)+
+  geom_text_repel(aes(label=sample), size=3, max.overlaps = Inf)+
   ggtitle("Expressed Genes in All Samples > 5 TPM") 
 ```
 This doesn't seem to match the correlation data which indicated that the treated samples were more similar to each other.
