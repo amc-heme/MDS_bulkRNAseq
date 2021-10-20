@@ -1,0 +1,60 @@
+---
+title: "splicing"
+author: "Monica Ransom"
+date: "10/18/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r load software, echo=FALSE}
+library(maser)
+library(rtracklayer)
+```
+
+```{r load data}
+path<-file.path("~/Desktop/rmats/rmats/WTvKO/")
+WTvKO<-maser(path, c("WT", "KO"),ftype="JCEC")
+WTvKO
+
+path<-file.path("~/Desktop/rmats/rmats/WTvWTIC/")
+WTvWTIC<-maser(path, c("WT", "WTIC"),ftype="JCEC")
+WTvWTIC
+
+```
+
+```{r}
+head(summary(WTvKO, type="SE")[,1:8])
+WTvKO_filter<-filterByCoverage(WTvKO, avg_reads = 5)
+WTvKO_top<-topEvents(WTvKO_filter, fdr= 0.05, deltaPSI = 0.1)
+WTvKO_Brd3<-geneEvents(WTvKO_filter, geneS = "Brd3")
+
+head(summary(WTvWTIC, type="SE")[,1:8])
+WTvWTIC_filter<-filterByCoverage(WTvWTIC, avg_reads = 5)
+WTvWTIC_top<-topEvents(WTvWTIC_filter, fdr= 0.05, deltaPSI = 0.1)
+head(summary(WTvWTIC_top))
+WTvWTIC_Acer3<-geneEvents(WTvWTIC_filter, geneS = "Acer3")
+WTvWTIC_Ppox<-geneEvents(WTvWTIC_filter, geneS = "Ppox")
+plotGenePSI(WTvWTIC_Acer3, type="SE", show_replicates=TRUE)
+plotGenePSI(WTvWTIC_Ppox, type="RI", show_replicates = TRUE)
+volcano(WTvWTIC_filter, fdr = 0.05, deltaPSI = 0.1, type = "SE")
+
+gtf_path<-file.path("~/Desktop/rmats/gencode.vM27.primary_assembly.annotation.gtf")
+ens_gtf<- rtracklayer::import.gff(gtf_path)
+
+ctc1_events <- geneEvents(WTvWTIC_filter, geneS = "Ctc1", fdr = 0.05, 
+                           deltaPSI = 0.1 )
+
+plotTranscripts(ctc1_events, type = "SE",  event_id = 257,
+                gtf = ens_gtf, zoom = FALSE, show_PSI = TRUE)
+
+Enpp1_events <- geneEvents(WTvWTIC_filter, geneS = "Enpp1", fdr = 0.05, 
+                           deltaPSI = 0.1 )
+
+plotTranscripts(Enpp1_events, type = "A3SS",  event_id = 84,
+                gtf = ens_gtf, zoom = FALSE)
+```
