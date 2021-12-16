@@ -1,0 +1,100 @@
+---
+title: "MDS-maser"
+author: "Monica Ransom"
+date: "11/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Analysis of splicing in the MDS data
+
+```{r packages, echo=FALSE}
+library(maser)
+library(rtracklayer)
+```
+
+```{r load data}
+path<-file.path("~/Desktop/rmats/MDS/rmats/rmats/BULKvNEG/")
+BULKvNEG<-maser(path, c("BULK","NEG"),ftype="JCEC")
+BULKvNEG
+
+path<-file.path("~/Desktop/rmats/MDS/rmats/rmats/BULKvPOS/")
+BULKvPOS<-maser(path, c("BULK", "POS"),ftype="JCEC")
+BULKvPOS
+
+path<-file.path("~/Desktop/rmats/MDS/rmats/rmats/POSvNEG/")
+POSvNEG<-maser(path, c("POS", "NEG"),ftype="JCEC")
+POSvNEG
+```
+
+```{r filtering}
+#filter by coverage, this reduces the number by about 1/2
+BULKvNEG_filtered<-filterByCoverage(BULKvNEG, avg_reads = 5)
+BULKvNEG_filtered
+
+BULKvPOS_filtered<-filterByCoverage(BULKvPOS, avg_reads=5)
+BULKvPOS_filtered
+
+POSvNEG_filtered<-filterByCoverage(POSvNEG, avg_reads = 5)
+POSvNEG_filtered
+```
+
+```{r top events}
+#using a FDR cutoff and PSI change find relative events this drastically lowers the #'s
+BULKvNEG_top<-topEvents(BULKvNEG_filtered, fdr=.05, deltaPSI = .1)
+BULKvNEG_top
+
+BULKvPOS_top<-topEvents(BULKvPOS_filtered, fdr=.05, deltaPSI = .1)
+BULKvPOS_top
+
+POSvNEG_top<-topEvents(POSvNEG_filtered, fdr=.05, deltaPSI = .1)
+POSvNEG_top
+
+
+
+
+```
+
+```{r volcano}
+volcano(BULKvNEG_top, type="SE")
+
+splicingDistribution(BULKvNEG_top)
+splicingDistribution(BULKvPOS_top)
+splicingDistribution(POSvNEG_top)
+
+pca(BULKvNEG_top)
+pca(BULKvPOS_top)
+pca(POSvNEG_top)
+
+```
+
+```{r plotTranscripts}
+gtf<-file.path("~/Desktop/rmats/MDS/rmats/gencode.v38.primary_assembly.annotation.gtf")
+ens_gtf<- rtracklayer::import.gff(gtf)
+
+head(summary(BULKvNEG_top, type = "SE")[, 1:8])
+#this can be done for any gene of interest
+## Retrieve SRSF6 splicing events
+ARF4_events <- geneEvents(BULKvNEG_filtered, geneS = "ARF4", fdr = 0.05, 
+                           deltaPSI = 0.1 )
+
+## Dislay affected transcripts and PSI levels
+plotTranscripts(ARF4_events, type = "SE", event_id = 186,
+                gtf = ens_gtf, zoom = FALSE, show_PSI = TRUE)
+
+##look at intron retention
+head(summary(BULKvNEG_top, type="RI")[, 1:8])
+
+kat6b_events<-geneEvents(BULKvNEG_filtered, geneS = "KAT6B", fdr=.05, deltaPSI = .1 )
+plotTranscripts(kat6b_events, type="RI", event_id = 7, gtf=ens_gtf, zoom=FALSE)
+
+#Mutually exclusive
+head(summary(BULKvNEG_top, type="MXE")[, 1:8])
+
+mlkl_events <- geneEvents(BULKvNEG_filtered, geneS = "MLKL", fdr = 0.05, deltaPSI = 0.1 )
+plotTranscripts(mlkl_events, type = "MXE", event_id = 694,
+                gtf = ens_gtf, zoom = FALSE)
+```
