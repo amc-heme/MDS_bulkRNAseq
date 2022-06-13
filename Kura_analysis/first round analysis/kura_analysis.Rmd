@@ -1,0 +1,347 @@
+---
+title: "MDS DGE analysis"
+author: "Monica Ransom"
+date: "8/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Pre-processing
+1.    Adapters were trimmed using cutadapt v1.16
+2.    Gene expression was quantified using salmon  v1.3.0
+3.    TPMs were obtained for the genes using tximport 1.20.0
+
+```{r import, message=FALSE, warning=FALSE}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+# BiocManager::install("DESeq2")
+# BiocManager::install("tximport")
+# BiocManager::install("tximportData")
+# BiocManager::install("EnhancedVolcano")
+# BiocManager::install("fgsea")
+# BiocManager::install("limma")
+
+library(dplyr)
+library(ggplot2)
+library(DESeq2)
+library(tximport)
+library(readr)
+library(tximportData)
+library(readxl)
+library(knitr)
+library(tidyverse)
+library(pheatmap)
+library(RColorBrewer)
+library(viridis)
+library(ggrepel)
+library(EnhancedVolcano)
+library(fgsea)
+library(limma)
+```
+## R Markdown
+
+## Define Color Scheme and plot them
+```{r, echo=FALSE, include=FALSE}
+plasma <- viridis::plasma(n = 10)
+viridis <- viridis::viridis(n = 10)
+cividis <- viridis::cividis(n=10)
+magma <- viridis::magma(n=10)
+```
+<br>
+___Plasma 1:10___
+```{r, echo=FALSE, fig.width=5, fig.height=1}
+qplot(x=1:length(plasma), y = 1, fill=factor(1:length(plasma)), geom="tile") +
+  scale_fill_manual(values = plasma) +
+  theme_void()+
+  theme(legend.position="none") 
+```
+<br>
+___Viridis 1:10___
+```{r, echo=FALSE, fig.width=5, fig.height=1}
+qplot(x=1:length(viridis), y = 1, fill=factor(1:length(plasma)), geom="tile") +
+  scale_fill_manual(values = viridis) +
+  theme_void()+
+  theme(legend.position="none") 
+```
+<br>
+___Cividis 1:10___
+```{r, echo=FALSE, fig.width=5, fig.height=1}
+qplot(x=1:length(cividis), y = 1, fill=factor(1:length(plasma)), geom="tile") +
+  scale_fill_manual(values = cividis) +
+  theme_void()+
+  theme(legend.position="none") 
+```
+<br>
+___Magma 1:10___
+```{r, echo=FALSE, fig.width=5, fig.height=1}
+qplot(x=1:length(magma), y = 1, fill=factor(1:length(plasma)), geom="tile") +
+  scale_fill_manual(values = magma) +
+  theme_void()+
+  theme(legend.position="none") 
+```
+
+
+## Generate a summary table of the samples sequenced and their sequencing and alignment metrics
+```{r summary, echo=FALSE}
+multiqc_general_stats <- read.delim("~/Desktop/RNAseq/Kura/Kura_analysis/multiqc_general_stats.txt")
+colnames(multiqc_general_stats)<-c("Sample", "Salmon_percent_mapped", "Salmon_reads", "STAR_percent_mapped", "STAR_reads", "fastp_duplication", "fastp_percent_after_filter_q30", "fastp_reads_after_filter_q30", "fastp_GC_content", "fastp_surviving_percent", "fastp_adapter_percent", "cutadapt_trimmed")
+kable(multiqc_general_stats)
+```
+
+## Import and Format Data for DeSEQ2
+
+```{r data, message=FALSE, echo=FALSE}
+metadata <- read_excel("~/Desktop/RNAseq/Kura/Kura_analysis/metadata.xlsx")
+#to generate a vector of names and file locations
+salmon_files<-list.files("~/Desktop/RNAseq/Kura/Kura_analysis/salmon/", pattern="quant.sf", recursive=TRUE, full.names=TRUE) %>% set_names(nm=metadata$Sample)
+
+
+
+
+#to call in a gene_map this was derived by pulling it out of the fasta file with a grep command for ENST and ENSG and pasting them together
+gene_map=read_csv("~/Desktop/RNAseq/gene_map.csv", col_names=c('enstid', 'ensgid'))
+
+# import transcript level counts
+txi.salmon.t<-tximport(salmon_files, type="salmon", txOut=TRUE)
+txi.salmon.g<-tximport(files=salmon_files, type="salmon", tx2gene= gene_map, ignoreTxVersion = TRUE, countsFromAbundance = 'lengthScaledTPM' )
+### this code works but if I remove the ignoreTxVersion I get an error, this may have to do with how I am generating my tx2gene file
+
+# Extract counts only
+counts <- txi.salmon.g$counts %>%
+  as.data.frame()
+#Extract TPM
+tpms <- data.frame(txi.salmon.g$abundance)
+
+##for clients the counts and tpm files should be written out
+
+```
+
+
+```{r expressed genes, echo=FALSE}
+
+expressed_genes<-tpms %>% filter_all(all_vars(. > 5))
+```
+
+
+## Sample heatmap using the spearman method and correlation heatmap
+```{r All samples Heatmap, echo=FALSE, fig.width=7.5, fig.height=7, fig.align='center'}
+## what we see here shows that patients cluster more closely than the cell types and this will need to be accounted for in the DGE
+pheatmap(expressed_genes, scale="row")
+cols.cor<-cor(expressed_genes, method="spearman")
+
+pheatmap(cols.cor, method="spearman")
+```
+## PCA plot
+
+
+
+```{r pca plot, echo=FALSE, message=FALSE}
+exp.pca <- prcomp(t(log2(expressed_genes)))
+exp.pca.summary <- summary(exp.pca)$importance
+pc1var = round(exp.pca.summary[3,1] * 100, 1)
+pc2var = round(exp.pca.summary[3,2] * 100 - pc1var, 1)
+pc3var = round(exp.pca.summary[3,3]*100 -pc1var -pc2var, 1)
+exp.pca.pc <- data.frame(exp.pca$x, sample = colnames(expressed_genes))
+
+```
+
+### PC1 vs PC2
+```{r, All samples PCA 1 vs 2, echo = FALSE, warning=FALSE,  fig.width= 6, fig.height=4.5, fig.align='center'}
+
+colors <- c(viridis[6], cividis[9], magma[6])
+ggplot(exp.pca.pc, aes(x = PC1, y = PC2, color=metadata$time, shape=metadata$dosage)) +
+  geom_point(size = 5)+
+  xlab(paste('PC1,', pc1var, '% explained var.')) +
+  ylab(paste('PC2,', pc2var, '% explained var.')) +
+  ggtitle("Expressed Genes in All Samples > 5 TPM") 
+
+ggplot(exp.pca.pc, aes(x = PC2, y = PC3, color=metadata$time, shape=metadata$dosage)) +
+  geom_point(size = 5)+
+  xlab(paste('PC2,', pc2var, '% explained var.')) +
+  ylab(paste('PC3,', pc3var, '% explained var.')) +
+  ggtitle("Expressed Genes in All Samples > 5 TPM") 
+
+
+```
+### We see a strong correlation with the time of dosage
+
+## 3. Run Differential Expression testing using DESeq2 and Calculate Gene Set Enrichment
+##  test to run
+#### sig = padj <0.01 and abs(l2fc) >0.5
+#### 
+
+```{r DGE, echo=FALSE, warning=FALSE, message=FALSE}
+#coldata<-dplyr::select(metadata, -Sample) 
+#metadata <- read_excel("~/Desktop/RNAseq/Kura/Kura_analysis/metadata.xlsx")
+coldata<-column_to_rownames(metadata, 'Sample')
+## need to confirm that all names are in the same order
+all(rownames(coldata) %in% colnames(txi.salmon.g$counts))
+all(rownames(coldata) == colnames(txi.salmon.g$counts))
+coldata<-coldata[colnames(txi.salmon.g$counts),]
+all(rownames(coldata) == colnames(txi.salmon.g$counts))
+
+ddsTc<-DESeqDataSetFromTximport(txi.salmon.g, colData=coldata, design= ~ dosage+time)
+keep <- rowSums(counts(ddsTc)) >= 10
+ddsTc <- ddsTc[keep,]
+
+#Run with the reduced model
+ddsTC<-DESeq(ddsTc, test="LRT", reduced =~ time) 
+res.dosage_all <- results(ddsTC)
+sum(res.dosage_all$padj < 0.01, na.rm=TRUE)
+
+# make comparisons with the Wald test
+ddsTc_wald <- DESeq(ddsTc, test = "Wald")
+resultsNames(ddsTc_wald)
+res.dosage_wald_Ctrl_vs_250_name <- results(ddsTc_wald, name =  "dosage_250_vs_0")
+res.dosage_wald_Ctrl_vs_250_contrast <- results(ddsTc_wald, contrast = c("dosage", "250", "0"))
+res.dosage_wald_3d_vs_4h_contrast <- results(ddsTc_wald, contrast = c("time", "d3", "4hr"))
+res.dosage_wald_Ctrl_vs_250 %>% dplyr::filter(padj <= 0.01) %>% mutate(direction = log2FoldChange > 0) %>% group_by(direction) %>% summarize(n = n())
+# Is MEN1 significant
+# MEN1=  ENSG00000133895 
+d<-plotCounts(ddsTC, gene="ENSG00000133895",intgroup=c("dosage","time"), returnData = TRUE)
+
+ggplot(d, aes(x=dosage, y=count, color=time))+geom_point()
+
+### this is not working
+e<-plotCounts(vstlatedosage, gene="ENSG00000133895",intgroup=c("dosage","time"), returnData = TRUE)
+ggplot(e, aes(x=dosage, y=count, color=time))+geom_point()
+
+subset(res.dosage_all, rownames(res.dosage_all)=="ENSG00000133895")
+
+vstTc <- vst(ddsTc, blind = FALSE)
+saveRDS(assay(vstTc), "vstTc_matrix.Rds")
+
+assay(vstTc)<- limma::removeBatchEffect(assay(vstTc), batch=coldata$batch, design=model.matrix(~dosage +time, data=coldata))
+saveRDS(assay(vstTc), "vstTc_batch_corrected.Rds")
+
+```
+# later timepoints only dosage and time DAY 3 and Day7
+## this doesn't work
+```{r data, message=FALSE, echo=FALSE}
+metadata2 <- read_excel("~/Desktop/RNAseq/Kura/Kura_analysis/metadata2.xlsx")
+#to generate a vector of names and file locations
+salmon_files2<-list.files("~/Desktop/RNAseq/Kura/Kura_analysis/salmon/", pattern="quant.sf", recursive=TRUE, full.names=TRUE) %>% set_names(nm=metadata2$Sample)
+
+# import transcript level counts
+txi.salmon2.t<-tximport(salmon_files2, type="salmon", txOut=TRUE)
+txi.salmon2.g<-tximport(files=salmon_files2, type="salmon", tx2gene= gene_map, ignoreTxVersion = TRUE, countsFromAbundance = 'lengthScaledTPM' )
+### this code works but if I remove the ignoreTxVersion I get an error, this may have to do with how I am generating my tx2gene file
+
+# Extract counts only
+counts <- txi.salmon2.g$counts %>%
+  as.data.frame()
+#Extract TPM
+tpms <- data.frame(txi.salmon2.g$abundance)
+
+##for clients the counts and tpm files should be written out
+
+
+#coldata<-dplyr::select(metadata, -Sample) 
+coldata2<-column_to_rownames(metadata2, 'Sample')
+## need to confirm that all names are in the same order
+all(rownames(coldata2) %in% colnames(txi.salmon2.g$counts))
+all(rownames(coldata2) == colnames(txi.salmon2.g$counts))
+coldata2<-coldata2[colnames(txi.salmon2.g$counts),]
+all(rownames(coldata2) == colnames(txi.salmon2.g$counts))
+
+ddslate<-DESeqDataSetFromTximport(txi.salmon2.g, colData=coldata2, design= ~ dosage+time+ dosage:time)
+ddslate<-DESeq(ddslate, test="LRT", reduced =~ dosage+time) 
+vstlate <- vst(ddslate, blind = FALSE)
+saveRDS(assay(vstlate), "vstlate_matrix.Rds")
+
+
+```
+
+# later timepoints testing time Day3/7
+```{r data, message=FALSE, echo=FALSE}
+
+
+ddslatetime<-DESeqDataSetFromTximport(txi.salmon2.g, colData=coldata2, design= ~ dosage+time)
+#filter
+keep<-rowSums(counts(ddslatetime))>=10
+ddslatetime<-ddslatetime[keep,]
+#run with reduced model to account for other variable
+ddslatetime<-DESeq(ddslatetime, test="LRT", reduced =~ dosage) 
+
+#extract result
+
+res.ddslatetime<-results(ddslatetime)
+sum(res.ddslatetime$padj < 0.01, na.rm=TRUE)
+
+```
+
+#later timepoints testing dosage day 3/7
+
+```{r data, message=FALSE, echo=FALSE}
+ddslatedosage<-DESeqDataSetFromTximport(txi.salmon2.g, colData=coldata2, design= ~ dosage+time)
+
+keep<-rowSums(counts(ddslatedosage))>=10
+ddslatedosage<-ddslatedosage[keep,]
+
+ddslatedosage<-DESeq(ddslatedosage, test="LRT", reduced =~ time) 
+
+
+res.ddslatedosage<-results(ddslatedosage)
+sum(res.ddslatedosage$padj < 0.01, na.rm=TRUE)
+
+subset(res.ddslatedosage, rownames(res.ddslatedosage)=="ENSG00000133895")
+```
+
+# all timepoints without control testing time  No CONTROLS
+```{r data, message=FALSE, echo=FALSE}
+metadata3 <- read_excel("~/Desktop/RNAseq/Kura/Kura_analysis/metadata3.xlsx")
+#to generate a vector of names and file locations
+salmon_files3<-list.files("~/Desktop/RNAseq/Kura/Kura_analysis/salmon/", pattern="quant.sf", recursive=TRUE, full.names=TRUE) %>% set_names(nm=metadata3$Sample)
+
+# import transcript level counts
+txi.salmon3.t<-tximport(salmon_files3, type="salmon", txOut=TRUE)
+txi.salmon3.g<-tximport(files=salmon_files3, type="salmon", tx2gene= gene_map, ignoreTxVersion = TRUE, countsFromAbundance = 'lengthScaledTPM' )
+### this code works but if I remove the ignoreTxVersion I get an error, this may have to do with how I am generating my tx2gene file
+
+# Extract counts only
+counts <- txi.salmon3.g$counts %>%
+  as.data.frame()
+#Extract TPM
+tpms <- data.frame(txi.salmon3.g$abundance)
+
+##for clients the counts and tpm files should be written out
+
+
+#coldata<-dplyr::select(metadata, -Sample) 
+coldata3<-column_to_rownames(metadata3, 'Sample')
+## need to confirm that all names are in the same order
+all(rownames(coldata3) %in% colnames(txi.salmon3.g$counts))
+all(rownames(coldata3) == colnames(txi.salmon3.g$counts))
+coldata3<-coldata3[colnames(txi.salmon3.g$counts),]
+all(rownames(coldata3) == colnames(txi.salmon3.g$counts))
+
+ddsnoc<-DESeqDataSetFromTximport(txi.salmon3.g, colData=coldata3, design= ~ dosage+time)
+keep<-rowSums(counts(ddsnoctime))>=10
+ddsnoctime<-ddsnoctime[keep,]
+
+ddsnoctime<-DESeq(ddsnoc, test="LRT", reduced =~ dosage) 
+
+
+res.noctime<-results(ddsnoctime)
+
+sum(res.noctime$padj < 0.01, na.rm=TRUE)
+
+```
+
+# all timepoints without controls testing dosage NO controls
+
+```{r data, message=FALSE, echo=FALSE}
+ddsnocdosage<-DESeqDataSetFromTximport(txi.salmon3.g, colData=coldata3, design= ~ dosage+time)
+keep<-rowSums(counts(ddsnocdosage))>=10
+ddsnocdosage<-ddsnocdosage[keep,]
+ddsnocdosage<-DESeq(ddsnocdosage, test="LRT", reduced =~ time) 
+
+
+res.nocdosage<-results(ddsnocdosage)
+
+sum(res.filtered.nocdosage$padj < 0.01, na.rm=TRUE)
+
+```
